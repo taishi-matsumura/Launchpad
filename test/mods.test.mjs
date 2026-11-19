@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { readModFile, modFile, buildMod, stockVersion, stockSections, MODS, STOCK_DSP, dspAlternatives, knownMod, lastWritten, markWritten } from "../src/lib/mods.js";
+import { readModFile, modFile, buildMod, stockVersion, stockSections, MODS, STOCK_DSP, EXPERIMENTS, dspAlternatives, knownMod, lastWritten, markWritten } from "../src/lib/mods.js";
 import { inspect } from "../src/lib/gp5flash.js";
 
 const IMG = fileURLToPath(new URL("../../../firmware/GP-5_USB_V1.0.6_20250626.bin", import.meta.url));
@@ -55,6 +55,21 @@ test("built-in mods survive being written to a mod file and read back", () => {
 
 test("built-in mods in research can't be installed", () => {
   for (const m of MODS.filter((x) => x.status === "research")) assert.throws(() => buildMod(new Uint8Array(10), m), /isn't ready/);
+});
+
+// Experiments (lib/mods.js EXPERIMENTS) share the mod format but keep out of the routing list: they promise no one
+// routing, so they reach the Mods screen as opened files. Their patch bytes come from the disassembly, so they are
+// checked against Valeton's own image here, and they may only change the DSP program.
+test("experiment mods: never a built-in row, never ready on paper, DSP-only, and the image has the bytes", { skip: !have && "no local stock firmware" }, () => {
+  for (const m of EXPERIMENTS) {
+    assert.ok(!MODS.some((x) => x.id === m.id) && m.id !== STOCK_DSP.id, `${m.id}: an experiment isn't a built-in routing row`);
+    assert.ok(["untested", "research"].includes(m.status), `${m.id}: an experiment can't claim "ready" before it has been on a pedal`);
+    const back = readModFile(modFile(m));
+    assert.equal(back.summary, m.summary, `${m.id}: tells too much for a mod file to hold`);
+    assert.deepEqual(back.patches.map((p) => [p.section, p.offset, Buffer.from(p.before).toString("hex"), Buffer.from(p.after).toString("hex")]), m.patches.map((p) => [p.section, p.offset, p.before, p.after]));
+    if (m.status === "research") continue;
+    assert.deepEqual(buildMod(image, m).sections.map(([t]) => t), [0x63], `${m.id}: only the DSP program`);
+  }
 });
 
 const dspMod = (id) => { const b = buildMod(image, MODS.find((m) => m.id === id)); assert.deepEqual(b.sections.map(([t]) => t), [0x63]); return b.sections[0][1]; };

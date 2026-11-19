@@ -35,17 +35,21 @@ export const MOD_FORMAT = "gp5-mod";
 // again, so the others' changes are gone. The Mods screen says that above the list; each summary ends with it too,
 // because a .gp5mod file travels on its own.
 const DSP_NOTE = " Another mod that changes the DSP program puts this one back.";
-// The three mods below fill the choices there are: what the pedal sends over USB (Valeton's preset / the dry guitar)
-// and what the outputs play (Valeton's mix / only what the computer sends back). Valeton's firmware is the pair that
-// isn't a mod, and all three others are confirmed on a pedal. Every title gives both answers in the same order:
+// The three routing mods below fill the choices there are: what the pedal sends over USB (Valeton's preset / the dry
+// guitar) and what the outputs play (Valeton's mix / only what the computer sends back). Valeton's firmware is the
+// pair that isn't a mod, and all three others are confirmed on a pedal. An experiment about choosing these without
+// reflashing sits in EXPERIMENTS further down, as a file rather than a row. Every title gives both answers in the
+// same order:
 // "USB sends <the preset | the dry guitar>, the outputs play <the pedal | only what comes back>". The word
 // "monitoring" is deliberately in no title, although it's the usual word for the second half: Valeton's own
 // Monitor Level is the gain of what comes back over USB (the DSP's 2:I2S input gain at 0x2000201C), a knob anyone can
-// turn, and these mods are not that: they are burned into the DSP program. There is no runtime switch for this:
-// Valeton's own settings and app only have levels (REC Level, Monitor Level, BT REC), nothing about the routing, and
-// the DSP's dry and monitor gains are literals in its code. So picking one of these means reflashing; the Mods
-// screen's "USB routing" list (views/mods.js) flashes just the DSP section for it: 49,992 bytes, 2,632 packets,
+// turn, and these mods are not that: they are burned into the DSP program. Picking one of these means reflashing; the
+// Mods screen's "USB routing" list (views/mods.js) flashes just the DSP section for it: 49,992 bytes, 2,632 packets,
 // against 65,124 for the control processor's app. dspAlternatives() below is what belongs in that list.
+// What the DSP does have, found in the disassembly (2026-11-19/20), is three built-in routing modes that replace
+// the whole pipeline — Valeton's own reamp-style matrix — but on the stock program the gate to them is the state of
+// the audio stream, and nothing a user can reach. The EXPERIMENTS mod below moves that gate onto a byte Valeton's
+// own link commands write, hoping some app control sends one; it changes no routing on its own and is untested.
 export const MODS = [
   {
     id: "usb-no-passthrough",
@@ -115,6 +119,48 @@ export const MODS = [
       { section: 0x63, offset: 0xB904, before: "601e0020", after: "601d0020", note: "preset pack: write to the first half (0x20001E60 -> 0x20001D60)" },
       { section: 0x63, offset: 0xB8A4, before: "00ee810a", after: "20ee810a", note: "left output: USB return only (vmla -> vmul)" },
       { section: 0x63, offset: 0xB8CE, before: "00ee810a", after: "20ee810a", note: "right output: USB return only (vmla -> vmul)" },
+    ],
+  },
+];
+
+// Experiments: mods born from the disassembly that don't promise one routing, so they don't take a built-in row in
+// the Mods screen's routing list (that list answers both routing questions in fixed words). They travel as .gp5mod
+// files that same screen can open; write-mod-files.mjs writes them out with the built-in mods. Nothing here claims
+// "ready" before it has been on a pedal.
+//
+// valeton-rec-switch. The DSP program holds three built-in routing modes that replace the whole audio pipeline,
+// next to the normal one: mode 1 plays the dry guitar out and sends it packed to USB, mode 2 plays only what comes
+// back over USB and keeps the USB send silent, mode 3 mixes the return in and packs the dry guitar. The dispatch
+// (0xB0AC) opens them on a gate byte (mailbox 0x20002060 +0x2c, read at 0xB0C2, any non-zero opens it) and picks
+// the mode by a flag byte (the getter at 0x23B4 reads parameters +0x170); compared to 1, 2, 3 at 0xB0D0..0x0B0DA.
+// On the stock program the gate is written by an audio-stream state machine (0xBAFA: stream setup, 44000.0 in it)
+// and the flag by one link command only, so no user control reaches either — which is why these modes never fire.
+// But the DSP's command-handler table (0x4DC8) has commands that write a mode byte (parameters +0x2E0): index 38
+// (handler 0x1604) writes +0x2E0 and the +0x170 flag together, index 40 (handler 0x1630) writes +0x2E0 alone; both
+// setters (0x2084) are plain byte stores. Which app control sends those commands is on the control processor's
+// side (0x62, Andes code we can't disassemble), and that is exactly what one flash of this mod is for: after it
+// the gate IS that mode byte, so any Valeton app action that sends one of those commands switches modes live.
+// Start-up zeroes +0x2E0, and the fail-safe change sends an unknown mode number into the normal pipeline, so until
+// such a command arrives the pedal is stock — flashed alone, this should change nothing audible. If some app
+// control does fire it, watch what the outputs and the DAW hear per mode: that gives a runtime routing switch
+// built out of Valeton's own parts, and a wire command to drive from the app later.
+export const EXPERIMENTS = [
+  {
+    id: "valeton-rec-switch",
+    title: "Valeton's own recording command switches the routing, no reflashing",
+    summary: "An experiment, not confirmed on a pedal: nothing changes on its own. It moves the gate of three " +
+      "routing modes Valeton's program already holds onto a byte its own link commands write; if some control in " +
+      "the app sends one, the modes switch live (dry out + dry to USB, return only, return + dry to USB). Until " +
+      "then the pedal is stock." + DSP_NOTE,
+    warn: "Untested: it may do nothing at all if Valeton's app never sends that command. Safe to try — the pedal " +
+      "starts and sounds stock, and Valeton's own row in the same list puts everything back.",
+    base: "1.0.6",
+    status: "untested",                                // from the disassembly, 2026-11-20; not tried on a pedal yet
+    patches: [
+      { section: 0x63, offset: 0xB0C2, before: "90f82c00", after: "90f8e002",
+        note: "the mode gate reads the command-written mode byte instead of the stream state (ldrb +0x2c -> +0x2E0)" },
+      { section: 0x63, offset: 0xB1BA, before: "5be0", after: "5ee0",
+        note: "a mode number nobody set falls back to the normal pipeline instead of skipping it (safe at start-up)" },
     ],
   },
 ];
