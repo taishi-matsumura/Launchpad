@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { readModFile, modFile, buildMod, stockVersion, stockSections, MODS, dspAlternatives, lastWritten, markWritten } from "../src/lib/mods.js";
+import { readModFile, modFile, buildMod, stockVersion, stockSections, MODS, STOCK_DSP, dspAlternatives, lastWritten, markWritten } from "../src/lib/mods.js";
 import { inspect } from "../src/lib/gp5flash.js";
 
 const IMG = fileURLToPath(new URL("../../../firmware/GP-5_USB_V1.0.6_20250626.bin", import.meta.url));
@@ -77,6 +77,17 @@ test("the dry guitar with quiet outputs: what the other two mods change, added u
     else assert.equal(both[i], stock63[i], `${hex}: neither of the two touches it, so this one must not`);
     assert.ok(both[i] === dry[i] || both[i] === quiet[i], `${hex}: not a byte either of the other mods puts there`);
   }
+});
+
+// going back to Valeton's own DSP program the same way as switching between mods: that one section, as it is
+test("Valeton's own DSP program: the fast way back, the same door as the mods", { skip: !have && "no local stock firmware" }, () => {
+  const built = buildMod(image, STOCK_DSP);
+  assert.deepEqual(built.sections.map(([t]) => t), [0x63]);
+  assert.deepEqual(Array.from(built.sections[0][1]), Array.from(stock63), "nothing changed in it");
+  assert.equal(built.plan.length, 0);
+  assert.equal(built.all.length, 5, "Undo still has the whole image behind it");
+  assert.ok(!dspAlternatives([STOCK_DSP, ...MODS]).includes(STOCK_DSP), "it isn't a mod: the screen puts the row in itself");
+  assert.throws(() => buildMod(image, { ...STOCK_DSP, stockDsp: false }), /isn't ready/, "only that row may write an unchanged section");
 });
 
 test("building a mod from Valeton's image", { skip: !have && "no local stock firmware" }, () => {

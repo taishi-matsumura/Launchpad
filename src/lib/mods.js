@@ -157,10 +157,16 @@ export function stockVersion(imageBytes) {
   return null;
 }
 
+// Valeton's own DSP program on its own: going back to it in seconds, the same way the mods are switched, without
+// the app and preset sections that Undo also writes. Mod files only ever change one part of the firmware, so for a
+// pedal running Valeton's firmware that is all a routing switch needs; Undo is still there for a mod that changed
+// the app, and it is the one that verifies every section of the image.
+export const STOCK_DSP = { id: "stock", stockDsp: true, status: "ready", base: "1.0.6", title: "Valeton's original, no mods", patches: [] };
+
 // Check a stock image for a mod and build the sections to flash: [[type, data]] plus a readable plan.
 // Throws ModError with a plain reason; nothing is changed unless every check passes.
 export function buildMod(imageBytes, mod) {
-  if (mod.status === "research" || !mod.patches.length) throw new ModError(`"${mod.title}" isn't ready to install yet.`);
+  if (mod.status === "research" || !(mod.patches?.length || mod.stockDsp)) throw new ModError(`"${mod.title}" isn't ready to install yet.`);
   let sections;
   try { sections = inspect(imageBytes).sections; } catch { throw new ModError("That file isn't a GP-5 firmware image."); }
   const want = STOCK[mod.base];
@@ -180,9 +186,10 @@ export function buildMod(imageBytes, mod) {
   for (let i = 1; i < spans.length; i++) if (spans[i][0] === spans[i - 1][0] && spans[i][1] < spans[i - 1][2]) throw new ModError("Two of the mod's changes overlap.");
   for (const p of mod.patches) out.get(p.section).set(asBytes(p.after), p.offset);
   const errs = [...(mod.patches.some((p) => p.section === SECTIONS.app) ? checkApp(out.get(SECTIONS.app)) : []),
-                ...(mod.patches.some((p) => p.section === SECTIONS.dsp) ? checkDsp(out.get(SECTIONS.dsp)) : [])];
+                ...(mod.stockDsp || mod.patches.some((p) => p.section === SECTIONS.dsp) ? checkDsp(out.get(SECTIONS.dsp)) : [])];
   if (errs.length) throw new ModError("The modded firmware wouldn't start: " + errs.join("; "));
   const touched = new Set(mod.patches.map((p) => p.section));
+  if (mod.stockDsp) touched.add(SECTIONS.dsp);            // Valeton's own program: rewritten as it is, changed by nothing
   // sections: only what the mod changes (for a pedal already on Valeton's firmware); all: the whole image with
   // the mod in it (for a pedal running anything else: its DSP needs Valeton's sections back too)
   return { sections: [...out].filter(([t]) => touched.has(t)), all: sections.map(([t, d]) => [t, out.get(t) ?? d]),
