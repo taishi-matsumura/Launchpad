@@ -35,6 +35,7 @@ export default {
     return ctx.banner("w-mods", "puzzle", "Mods", "",
         { chips: [`${all.length} mod${all.length === 1 ? "" : "s"}`, `${all.filter((m) => m.status !== "research").length} ready`],
           actions: `<button class="btn" data-act="file">${icon("file-import", 16)} Open a mod file</button>` }) + `
+      <p class="muted" style="margin:0 0 10px">Mods that change the same part of the firmware are alternatives: installing one puts the others back.</p>
       <div class="stack">${MODS.map((m) => card(ctx, m, false)).join("")}${ui.loaded.map((m) => card(ctx, m, true)).join("")}
         ${ui.progress ? `<div class="card"><p class="muted" style="font-size:13px;margin-bottom:6px">${esc(ui.progress.label)}</p><progress max="1" value="${ui.progress.f}"></progress></div>` : ""}
         ${ui.result ? `<div class="note ${ui.result.ok ? "good" : "bad"}">${icon(ui.result.ok ? "circle-check" : "alert-triangle", 16)}<span style="white-space:pre-wrap">${esc(ui.result.text)}</span></div>` : ""}
