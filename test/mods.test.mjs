@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { readModFile, modFile, buildMod, stockVersion, stockSections, MODS } from "../src/lib/mods.js";
+import { readModFile, modFile, buildMod, stockVersion, stockSections, MODS, dspAlternatives, lastWritten, markWritten } from "../src/lib/mods.js";
 import { inspect } from "../src/lib/gp5flash.js";
 
 const IMG = fileURLToPath(new URL("../../../firmware/GP-5_USB_V1.0.6_20250626.bin", import.meta.url));
@@ -103,6 +103,39 @@ test("building a mod from Valeton's image", { skip: !have && "no local stock fir
   assert.equal(stockVersion(modded), null);
   assert.deepEqual(stockSections(image, true).map(([t]) => t).sort((a, b) => a - b), [0x62, 0x63, 0x65]);
   assert.equal(stockSections(image, false).length, 5);
+});
+
+// the Mods screen's "USB routing" list: everything that only rewrites the DSP program can be swapped for another
+// there, in seconds; mods that touch the app or the user's presets can't.
+const alt = (id, status, patches) => ({ id, title: id, status, base: "1.0.6", patches });
+test("the DSP program's alternatives: what may be swapped in the USB routing list", () => {
+  const only = (id) => alt(id, "ready", [{ section: 0x63, offset: 8, before: "00", after: "01" }]);
+  const mix = alt("app-and-dsp", "ready", [{ section: 0x63, offset: 8, before: "00", after: "01" }, { section: 0x62, offset: 0x200, before: "00", after: "01" }]);
+  const presets = alt("preset-level", "ready", [{ section: 0x65, offset: 0x2000, before: "00", after: "01" }]);
+  const got = dspAlternatives([only("one"), mix, only("two"), alt("later", "research", [{ section: 0x63, offset: 8, before: "00", after: "01" }]),
+                               alt("try", "untested", [{ section: 0x63, offset: 8, before: "00", after: "01" }]), presets, only("one")]);
+  assert.deepEqual(got.map((m) => m.id), ["one", "two", "try"]);
+  assert.deepEqual(dspAlternatives(MODS).map((m) => m.id),
+                   MODS.filter((m) => m.status !== "research").map((m) => m.id), "the built-in mods are USB routing choices");
+});
+
+// what this computer last wrote (the screen's only hint: the pedal can't tell us, lib/mods.js says why)
+const memStore = () => { const map = new Map(); return { getItem: (k) => (map.has(k) ? map.get(k) : null), setItem: (k, v) => map.set(k, String(v)), removeItem: (k) => map.delete(k) }; };
+test("what this Launchpad last wrote: a hint, kept on this computer", () => {
+  const s = memStore();
+  assert.equal(lastWritten(s), null);
+  const one = { id: "usb-dry-out", title: "USB sends the dry guitar", base: "1.0.6" };
+  markWritten(s, one);
+  assert.equal(lastWritten(s).id, "usb-dry-out");
+  assert.ok(lastWritten(s).at, "it says when");
+  markWritten(s, { id: "stock", title: "Valeton's original", base: "1.0.6" });
+  assert.equal(lastWritten(s).id, "stock");
+  s.setItem("mods-last-written-v1", "{ not json");
+  assert.equal(lastWritten(s), null);
+  const broken = { getItem: () => { throw new Error("no storage"); }, setItem: () => { throw new Error("no storage"); }, removeItem: () => {} };
+  assert.equal(lastWritten(broken), null);
+  assert.equal(markWritten(broken, one), null, "writing is never stopped by a broken hint");
+  assert.equal(lastWritten(), null, "no localStorage in the environment: no hint, no error");
 });
 
 // where a section's data starts in the container (for making a modified copy in memory)

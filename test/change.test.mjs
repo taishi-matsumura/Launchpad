@@ -56,3 +56,22 @@ test("back to Valeton: area wiped, order table 0..99", async () => {
   assert.ok(p.flash.subarray(0x170064, 0x18A000).every((v) => v === 0xFF));
   assert.ok(p.flash.subarray(0x13F000, 0x170000).every((v) => v === 0xFF));
 });
+
+// The Mods screen's USB routing list: rewriting the DSP program alone, on a pedal already running Valeton's
+// firmware, changes no ownership, so nothing is asked and nothing is wiped (views/mods.js relies on that).
+test("the same firmware again: no question, no wipe, one section written", async () => {
+  const p = new SimPedal({ mode: F.MODE_STOCK });
+  const [name] = await p.names(), state = { pedal: { name, mode: F.MODE_STOCK, firmware: null }, link: null, busy: null };
+  const ctx = { state, asked: 0,
+    choose: async () => { ctx.asked++; return "flash"; },
+    withPorts: async (_l, fn) => fn(p) };
+  const dsp = new Uint8Array(0x800).fill(0x11); dsp[0x100] = 0x22;
+  const r = await changeFirmware(ctx, { sections: [[0x63, dsp]], target: { kind: "stock", title: "Valeton's firmware with a mod" },
+    backupNow: async () => true, say: () => {}, progress: () => {} });
+  assert.equal(ctx.asked, 0, "the same firmware doesn't lose anything: nothing to ask");
+  assert.equal(r.wiped, false);
+  assert.equal(r.mode, F.MODE_STOCK);
+  assert.deepEqual(Array.from(p.written[0x63]), Array.from(dsp));
+  assert.equal(p.written[0x62], undefined, "only the DSP section went over MIDI");
+  assert.equal(Object.keys(p.written).length, 1);
+});

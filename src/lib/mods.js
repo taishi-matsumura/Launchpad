@@ -32,8 +32,9 @@ const DSP_NOTE = " Another mod that changes the DSP program puts this one back."
 // and what the outputs play (Valeton's mix / only what the computer sends back). Valeton's firmware is the pair that
 // isn't a mod, and all three others are confirmed on a pedal. There is no runtime switch for this: Valeton's own
 // settings and app only have levels (REC Level, Monitor Level, BT REC), nothing about the routing, and the DSP's dry
-// and monitor gains are literals in its code. So picking one of these means reflashing; a button in Launchpad to
-// reflash just the DSP section, in seconds, is the way to make that bearable.
+// and monitor gains are literals in its code. So picking one of these means reflashing; the Mods screen's "USB
+// routing" list (views/mods.js) flashes just the DSP section for it: 49,992 bytes, 2,632 packets, against 65,124 for
+// the control processor's app. dspAlternatives() below is what belongs in that list.
 export const MODS = [
   {
     id: "usb-no-passthrough",
@@ -197,3 +198,45 @@ export function stockSections(imageBytes, onStock) {
   const all = inspect(imageBytes).sections;
   return onStock ? all.filter(([t]) => t in PATCHABLE_TYPES) : all;
 }
+
+// ------------------------------------------------------------------ the DSP program's alternatives
+
+// Mods that only change the DSP program (0x63): they all rewrite the same section from the stock image, so each one
+// puts the others back and they are alternatives to pick between. Those go in the Mods screen's "USB routing" list,
+// where picking one rewrites that section alone (2,632 packets of 19 bytes) instead of the whole firmware. Mods that
+// also change the app or the presets stay out: putting one of those back would erase the user's presets.
+// Built-in mods that are still being worked out (status "research") can't be installed, so they aren't listed.
+export function dspAlternatives(mods) {
+  const seen = new Set();
+  return mods.filter((m) => m.status !== "research" && m.patches?.length && m.patches.every((p) => p.section === SECTIONS.dsp))
+             .filter((m) => !seen.has(m.id) && seen.add(m.id));
+}
+
+// ------------------------------------------------------------------ what this Launchpad last wrote
+
+// The pedal can't tell us what's in it now: nothing in Valeton's firmware or the factory loader reads flash back
+// (the flashRead command 7E 05 belongs to the OpenGP5 platform, and the 12 30 state query answers four fixed bytes),
+// and the GP-5 has no device id to key a record on. So the Mods screen only says what this computer last wrote:
+// a hint, never part of the writing, which is always rebuilt from the user's stock image (buildMod) and so is
+// idempotent. Storage: { id, title, at } with id "stock" for Valeton's original; null when nothing was written here.
+export const LAST_WRITTEN_KEY = "mods-last-written-v1";
+
+const readWritten = (storage) => {
+  try { const o = JSON.parse(storage.getItem(LAST_WRITTEN_KEY) || "null"); return o && typeof o.id === "string" ? o : null; }
+  catch { return null; }
+};
+
+export const lastWritten = (storage = typeof localStorage === "undefined" ? {} : localStorage) => readWritten(storage);
+
+// Record what a flash put on the pedal (a mod, or Valeton's original). A mod file re-opened later with the same id
+// still matches; one that has since changed is shown as no longer in the list.
+export function markWritten(storage, { id, title, base }) {
+  try { storage.setItem(LAST_WRITTEN_KEY, JSON.stringify({ id, title, base, at: new Date().toISOString() })); }
+  catch { /* no storage: the hint is for this session only */ }
+  return readWritten(storage);
+}
+
+export function forgetWritten(storage = typeof localStorage === "undefined" ? {} : localStorage) {
+  try { storage.removeItem(LAST_WRITTEN_KEY); } catch { /* nothing to forget */ }
+}
+
