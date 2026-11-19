@@ -9,6 +9,10 @@
 //     "patches": [ { "section": "app" | "presets" | "dsp", "offset": 1234 | "0x4d2", "before": "hex", "after": "hex",
 //                    "note": "what this changes" } ] }
 //
+// A mod's id is its name, and the list has one row per name: a file that carries a built-in mod's id is the same
+// mod (Launchpad shows its own copy, whose words are the current ones) or a different mod that needs a new id.
+// knownMod() below makes that call.
+//
 // Patchable: the control processor's app (0x62) and presets (0x65), and the DSP's program (0x63). All three are
 // always recoverable: Foot+PARA lives in the control processor's factory loader, and the DSP's update mode in its
 // factory resident (DSP flash 0x0-0x4000), neither of which any update writes. The start-up code is off limits:
@@ -142,12 +146,31 @@ export function readModFile(bytes) {
   return mod;
 }
 
+// The changes a mod makes, as strings that compare: notes, titles and the order the file lists them in don't
+// matter, only which bytes go where.
+const changeSet = (mod) => new Set((mod.patches || []).map((p) => `${p.section}@${p.offset}:${hxBytes(asBytes(p.before))}>${hxBytes(asBytes(p.after))}`));
+const hxBytes = (b) => Array.from(b, (v) => v.toString(16).padStart(2, "0")).join("");
+
+// A mod file meeting the mods Launchpad already knows: the built-in ones and Valeton's own row. A mod's id is its
+// name, so the same id means the same thing, and files get shared around with names Launchpad has stopped using:
+//   "same"  the file changes exactly the bytes one of ours changes. Same mod, older words: show ours, whose name and
+//           summary are the current ones, and don't add a second row that writes the same thing.
+//   "clash" the same id with different changes: a different mod wearing another mod's name. No row could say what it
+//           writes honestly, and one id in two rows would make the USB routing list ambiguous, so it doesn't go in.
+//   null    a name Launchpad doesn't have: the file's mod is new and belongs in the list.
+export function knownMod(mod, builtIn = [STOCK_DSP, ...MODS]) {
+  const known = builtIn.find((m) => m.id === mod.id);
+  if (!known) return null;
+  const ours = changeSet(known), theirs = changeSet(mod);
+  const same = known.base === mod.base && ours.size === theirs.size && [...ours].every((k) => theirs.has(k));
+  return { why: same ? "same" : "clash", mod: known };
+}
+
 // A mod file for a mod (for sharing / the tests).
 export function modFile(mod) {
   const name = Object.fromEntries(Object.entries(PATCHABLE).map(([k, v]) => [v, k]));
-  const hx = (b) => Array.from(b, (v) => v.toString(16).padStart(2, "0")).join("");
   return new TextEncoder().encode(JSON.stringify({ format: MOD_FORMAT, version: 1, id: mod.id, title: mod.title, summary: mod.summary, author: mod.author || "",
-    base: mod.base, patches: mod.patches.map((p) => ({ section: name[p.section], offset: "0x" + p.offset.toString(16), before: hx(asBytes(p.before)), after: hx(asBytes(p.after)), note: p.note || "" })) }, null, 1) + "\n");
+    base: mod.base, patches: mod.patches.map((p) => ({ section: name[p.section], offset: "0x" + p.offset.toString(16), before: hxBytes(asBytes(p.before)), after: hxBytes(asBytes(p.after)), note: p.note || "" })) }, null, 1) + "\n");
 }
 const asBytes = (v) => (v instanceof Uint8Array ? v : hexBytes(v, "patch"));
 

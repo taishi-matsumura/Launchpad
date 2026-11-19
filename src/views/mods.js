@@ -1,7 +1,7 @@
 // Mods: changes to Valeton's stock firmware, built in or from shared .gp5mod files, installed from the user's own
 // stock image (lib/mods.js). Undo = put Valeton's original back from the same file.
 import * as F from "../lib/gp5flash.js";
-import { MODS, STOCK_DSP, buildMod, readModFile, stockSections, stockVersion, dspAlternatives, lastWritten, markWritten } from "../lib/mods.js";
+import { MODS, STOCK_DSP, buildMod, readModFile, stockSections, stockVersion, dspAlternatives, knownMod, lastWritten, markWritten } from "../lib/mods.js";
 import { changeFirmware } from "../lib/change.js";
 import { catalogFromImage, saveCatalog, loadSavedCatalog } from "../lib/stockcat.js";
 import { backupNow } from "./backups.js";
@@ -70,6 +70,19 @@ function routing(ctx, loaded) {
       The pedal can't say what it runs now, so Launchpad only says what it wrote here itself${wrote ? `, ${esc(String(wrote.at || "").slice(0, 10))}` : ""}.</p>
     ${onStock ? "" : `<div class="note warn">${icon("info-circle", 16)}<span>Pick one of these when the pedal is running Valeton's firmware${state.pedal ? " — this one isn't, so its whole firmware would have to be rewritten, which is what the buttons below do" : ""}.</span></div>`}
     <div class="list" style="margin-top:10px">${alts.map((m) => altTile(ctx, m, cur, onStock, state.busy)).join("")}</div></section>`;
+}
+
+// Opening a .gp5mod file. A mod's id is its name, so a file that carries one Launchpad already has doesn't join the
+// list as another row: with the same changes it is the same mod under another (often older) name, and Launchpad's
+// own row is the one that shows and writes it; with different changes it is a different mod that has to say so in a
+// new id, because a row can't promise bytes it doesn't write. Returns { mod, note }: the mod to add, and what to
+// say instead of adding it.
+export function loadModFile(bytes) {
+  const m = readModFile(bytes), known = knownMod(m);
+  if (!known) return { mod: m, note: null };
+  return { mod: null, note: known.why === "same"
+    ? { ok: true, text: `Launchpad already has this mod: "${known.mod.title}". The file changes the same bytes, so it is the same mod under another name: nothing to add to the list, and its row above writes it.` }
+    : { ok: false, text: `Launchpad already has a row called "${m.id}" (${known.mod.title}), and this file changes different bytes. One name can't stand for two sets of changes: the file needs a different id.` } };
 }
 
 export default {
@@ -144,9 +157,9 @@ export default {
       const f = await ctx.openFile("Open a mod file", [{ name: "GP-5 mod", extensions: ["gp5mod"] }]);
       if (!f) return;
       try {
-        const m = readModFile(f.bytes);
-        ui.loaded = [...ui.loaded.filter((x) => x.id !== m.id), m];
-        ui.result = null;
+        const r = loadModFile(f.bytes);
+        if (r.mod) ui.loaded = [...ui.loaded.filter((x) => x.id !== r.mod.id), r.mod];
+        ui.result = r.note;
       } catch (e) { ui.result = { ok: false, text: e.message }; }
       ctx.render();
     };

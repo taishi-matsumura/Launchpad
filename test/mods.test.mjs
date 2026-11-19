@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { readModFile, modFile, buildMod, stockVersion, stockSections, MODS, STOCK_DSP, dspAlternatives, lastWritten, markWritten } from "../src/lib/mods.js";
+import { readModFile, modFile, buildMod, stockVersion, stockSections, MODS, STOCK_DSP, dspAlternatives, knownMod, lastWritten, markWritten } from "../src/lib/mods.js";
 import { inspect } from "../src/lib/gp5flash.js";
 
 const IMG = fileURLToPath(new URL("../../../firmware/GP-5_USB_V1.0.6_20250626.bin", import.meta.url));
@@ -144,6 +144,51 @@ test("the USB routing titles: both answers, in the same words, and no routing tw
   assert.deepEqual([...cells].sort(), ["the dry guitar -> only what comes back", "the dry guitar -> the pedal",
                                        "the preset -> only what comes back"]);
   assert.ok(!cells.has("the preset -> the pedal"), "that one is Valeton's own, which isn't a mod: the screen's Valeton row says it");
+});
+
+// One mod, one row. A mod's id is its name, so a shared .gp5mod file that carries a built-in mod's id is either the
+// same mod under older words (then Launchpad's own copy is the one to show: its name is the current one, and two
+// rows would only be two ways of writing the same bytes) or a different mod wearing another mod's name (then it
+// doesn't go in the list: its row would promise bytes it doesn't write, and the USB routing list couldn't say which
+// one its row writes). Files on other people's computers can't bring back a name Launchpad stopped using.
+test("a mod file Launchpad already has: the same mod, or a name that's taken", () => {
+  const json = (o) => new TextEncoder().encode(JSON.stringify(o));
+  const fileOf = (m) => JSON.parse(new TextDecoder().decode(modFile(m)));
+  for (const m of MODS) {
+    const k = knownMod(readModFile(modFile(m)));
+    assert.equal(k.why, "same", `${m.id}: read back from a file it is the same mod, whatever the file calls it`);
+    assert.equal(k.mod, m, "and it is Launchpad's own row that shows");
+  }
+  const one = fileOf(MODS[0]);
+  assert.equal(knownMod(readModFile(json({ ...one, patches: one.patches.slice(0, 1) }))).why, "clash", "one change short is another mod");
+  assert.equal(knownMod(readModFile(json({ ...one, patches: [...one.patches].reverse(), title: "An old name", summary: "older words", author: "someone" }))).why,
+               "same", "only the bytes count, not the order or the words");
+  assert.equal(knownMod({ ...MODS[0], base: "1.0.5" }, MODS).why, "clash", "the same bytes on another Valeton version is another mod");
+  assert.equal(knownMod(readModFile(enc({ ...base, patches: [TEXT] }))), null, "a name Launchpad doesn't have: the file belongs in the list");
+  assert.equal(knownMod(readModFile(enc({ ...base, id: "stock", patches: [{ section: "dsp", offset: "0x200", before: "00", after: "01" }] }))).mod.id,
+               "stock", "Valeton's own row keeps its name too");
+  assert.deepEqual(MODS.map((m) => m.id), [...new Set(MODS.map((m) => m.id))], "built-in mods have one name each");
+  assert.ok(MODS.every((m) => m.id !== STOCK_DSP.id), "and none of them is Valeton's own row");
+});
+
+// The Mods screen makes that call when a file is opened (views/mods.js loadModFile): nothing joins the list, and the
+// message says why in the words Launchpad uses now. This is the whole point of the merge: someone with a file from
+// before the names changed gets one row, with the current name, not two rows with a stale one.
+test("opening a mod file the Mods screen already has: one row, Launchpad's name", async () => {
+  const { loadModFile } = await import("../src/views/mods.js");
+  const bytes = (o) => new TextEncoder().encode(JSON.stringify(o));
+  const old = { ...JSON.parse(new TextDecoder().decode(modFile(MODS[1]))), title: "USB sends the dry guitar", summary: "older words", author: "a friend" };
+  const same = loadModFile(bytes(old));
+  assert.equal(same.mod, null, "no second row for a mod Launchpad already lists");
+  assert.ok(same.note.ok, "that isn't an error, so it reads as news");
+  assert.ok(same.note.text.includes(MODS[1].title), "the row that stays has Launchpad's current name, not the file's older one");
+  const clash = loadModFile(bytes({ ...old, patches: [old.patches[0]] }));
+  assert.equal(clash.mod, null, "and a different mod wearing the same id is not quietly accepted either");
+  assert.equal(clash.note.ok, false);
+  assert.match(clash.note.text, /different id/);
+  const fresh = loadModFile(enc({ ...base, id: "quiet", title: "Quiet", patches: [TEXT] }));
+  assert.equal(fresh.mod.id, "quiet", "a mod Launchpad doesn't know still joins the list");
+  assert.equal(fresh.note, null, "with nothing to explain");
 });
 
 // what this computer last wrote (the screen's only hint: the pedal can't tell us, lib/mods.js says why)
