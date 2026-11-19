@@ -30,7 +30,10 @@ export const MOD_FORMAT = "gp5-mod";
 const DSP_NOTE = " Another mod that changes the DSP program puts this one back.";
 // The three mods below fill the choices there are: what the pedal sends over USB (Valeton's preset / the dry guitar)
 // and what the outputs play (Valeton's mix / only what the computer sends back). Valeton's firmware is the pair that
-// isn't a mod. A runtime switch for both, instead of reflashing, is what to work towards.
+// isn't a mod, and all three others are confirmed on a pedal. There is no runtime switch for this: Valeton's own
+// settings and app only have levels (REC Level, Monitor Level, BT REC), nothing about the routing, and the DSP's dry
+// and monitor gains are literals in its code. So picking one of these means reflashing; a button in Launchpad to
+// reflash just the DSP section, in seconds, is the way to make that bearable.
 export const MODS = [
   {
     id: "usb-no-passthrough",
