@@ -59,9 +59,11 @@ export const MODS = [
   // half (the recording comes back as the preset). Swapping where the two pack loops write makes the half on USB
   // the dry one. Each of those patches is one literal in a ldr [pc, #..] pool (the loop stores to [base, r0, lsl #2]),
   // so same length, no code moved. What isn't proven: why the half is dry (its source buffers are initialised by the
-  // DSP's resident ROM, which isn't in any image we have), whether the control processor reads the other half
-  // anywhere else, and whether the dry pack reads the frame the output mix loop writes (if it did, the USB would
-  // carry the return rather than the dry guitar). The 0xB4C0 literal is shared with three test-mode handlers
+  // DSP's resident ROM, which isn't in any image we have), and whether the control processor reads the other half
+  // anywhere else. What is proven now: the dry pack doesn't read the frame the output mix loop writes — with both
+  // changes in ("usb-dry-out-and-return", on a pedal 2026-11-20) the USB still carries the dry guitar while the
+  // outputs play only what the computer sends back.
+  // The 0xB4C0 literal is shared with three test-mode handlers
   // (0xB114, 0xB1AA, 0xB220) that normal running never reaches; if they did run they would write over the pointer
   // array at 0x20002060, which sits right after the block (no room to spare).
   {
@@ -81,13 +83,16 @@ export const MODS = [
     id: "usb-dry-out-and-return",
     title: "USB sends the dry guitar, the outputs play what comes back",
     summary: "The USB recording gets the dry guitar instead of the preset, and the outputs play only what comes back " +
-      "over USB: with nothing coming back they are silent, so undo it to play on your own. The send on its own, the " +
-      "outputs left as Valeton made them, is confirmed on a pedal; this pair isn't yet." + DSP_NOTE,
+      "over USB: with nothing coming back they are silent, so undo it to play on your own. Tried on a pedal: a DAW " +
+      "records a clean DI, and the outputs stay quiet until the computer sends something back." + DSP_NOTE,
     base: "1.0.6",
-    status: "untested",                                // the two changes together have not been on a pedal
+    status: "ready",                                   // tried on a pedal, 2026-11-20
     // The other mod's two vmla -> vmul changes on top of the pack swaps above: the whole of what Valeton's own
     // interface mode looks like it wants, a DAW recording the dry guitar and the pedal playing back what the
     // computer sends. Four patches, two loops, no bytes shared (see above).
+    // On a pedal (2026-11-20): the DAW records the dry guitar, and the outputs are silent with nothing coming back,
+    // then play what the computer sends. So the dry pack doesn't read the frame the output mix loop writes: the two
+    // loops stay independent, which was the open question above.
     patches: [
       { section: 0x63, offset: 0xB4C0, before: "601e0020", after: "601f0020", note: "dry pack: write to the second half (0x20001E60 -> 0x20001F60)" },
       { section: 0x63, offset: 0xB904, before: "601e0020", after: "601d0020", note: "preset pack: write to the first half (0x20001E60 -> 0x20001D60)" },
