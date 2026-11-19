@@ -46,7 +46,8 @@ const variants = (loaded) => [STOCK_DSP, ...dspAlternatives([...MODS, ...loaded]
 function altTile(ctx, m, cur, onStock, busy) {
   const { esc, icon } = ctx;
   const here = cur === m.id, stock = !!m.stockDsp;
-  const sub = stock ? "Valeton's own DSP program: picking it puts any of these back, in the same few seconds."
+  const sub = stock ? "USB sends the preset, the outputs play the pedal and what comes back: Valeton's own. Picking it "
+                    + "puts any of these back, in the same few seconds."
     : `${m.patches.length} change${m.patches.length === 1 ? "" : "s"} to Valeton V${esc(m.base)}`;
   return `<div class="item tall${here ? " sel" : ""}"><span class="main">
       <span class="name">${esc(m.title)}${here ? ' <span class="pill now">written here</span>' : ""}</span><span class="sub">${sub}</span></span>
@@ -61,7 +62,9 @@ function routing(ctx, loaded) {
   return `<section class="card"><div class="card-head"><h2>${icon("arrows-exchange", 18)} USB routing</h2>
       <span class="pill world">${alts.length} choices</span></div>
     <p class="muted">Which of these the pedal runs is decided by its DSP program, not by a setting: Valeton's own
-      settings and app only have levels. Picking one rewrites the ${DSP} from Valeton's file on this computer: a few
+      settings and app only have levels. Every name says the two things that differ: what the pedal sends over USB
+      (its preset, or the dry guitar) and what the outputs play (the pedal, or only what the computer sends back).
+      Picking one rewrites the ${DSP} from Valeton's file on this computer: a few
       seconds, and the presets and settings stay. The Valeton row writes Valeton's own program back the same way, so
       it puts any of these back; the Undo below also rewrites the app and preset parts, for a mod that changed those.
       The pedal can't say what it runs now, so Launchpad only says what it wrote here itself${wrote ? `, ${esc(String(wrote.at || "").slice(0, 10))}` : ""}.</p>

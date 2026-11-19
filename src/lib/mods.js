@@ -30,18 +30,22 @@ export const MOD_FORMAT = "gp5-mod";
 const DSP_NOTE = " Another mod that changes the DSP program puts this one back.";
 // The three mods below fill the choices there are: what the pedal sends over USB (Valeton's preset / the dry guitar)
 // and what the outputs play (Valeton's mix / only what the computer sends back). Valeton's firmware is the pair that
-// isn't a mod, and all three others are confirmed on a pedal. There is no runtime switch for this: Valeton's own
-// settings and app only have levels (REC Level, Monitor Level, BT REC), nothing about the routing, and the DSP's dry
-// and monitor gains are literals in its code. So picking one of these means reflashing; the Mods screen's "USB
-// routing" list (views/mods.js) flashes just the DSP section for it: 49,992 bytes, 2,632 packets, against 65,124 for
-// the control processor's app. dspAlternatives() below is what belongs in that list.
+// isn't a mod, and all three others are confirmed on a pedal. Every title gives both answers in the same order:
+// "USB sends <the preset | the dry guitar>, the outputs play <the pedal | only what comes back>". The word
+// "monitoring" is deliberately in no title, although it's the usual word for the second half: Valeton's own
+// Monitor Level is the gain of what comes back over USB (the DSP's 2:I2S input gain at 0x2000201C), a knob anyone can
+// turn, and these mods are not that: they are burned into the DSP program. There is no runtime switch for this:
+// Valeton's own settings and app only have levels (REC Level, Monitor Level, BT REC), nothing about the routing, and
+// the DSP's dry and monitor gains are literals in its code. So picking one of these means reflashing; the Mods
+// screen's "USB routing" list (views/mods.js) flashes just the DSP section for it: 49,992 bytes, 2,632 packets,
+// against 65,124 for the control processor's app. dspAlternatives() below is what belongs in that list.
 export const MODS = [
   {
     id: "usb-no-passthrough",
-    title: "USB audio interface, no direct monitoring",
+    title: "USB sends the preset, the outputs play only what comes back",
     summary: "The outputs play only what comes back over USB, not the guitar, so with nothing coming back they are " +
       "silent. The recording doesn't change: the pedal still sends its preset (two channels, no dry channel to pick " +
-      "off). Undo it to use the pedal on its own." + DSP_NOTE,
+      "off)." + DSP_NOTE,
     base: "1.0.6",
     // "research": being worked out, can't be installed; "untested": installable, not yet confirmed on a pedal;
     // "ready": confirmed on a pedal
@@ -72,7 +76,7 @@ export const MODS = [
   // array at 0x20002060, which sits right after the block (no room to spare).
   {
     id: "usb-dry-out",
-    title: "USB sends the dry guitar",
+    title: "USB sends the dry guitar, the outputs play the pedal",
     summary: "The USB recording gets the dry guitar instead of the preset. The outputs keep playing the preset and " +
       "whatever comes back over USB, so the pedal works on its own. Tried on a pedal: a DAW records a clean DI, " +
       "without the preset's sound." + DSP_NOTE,
@@ -85,10 +89,10 @@ export const MODS = [
   },
   {
     id: "usb-dry-out-and-return",
-    title: "USB sends the dry guitar, the outputs play what comes back",
+    title: "USB sends the dry guitar, the outputs play only what comes back",
     summary: "The USB recording gets the dry guitar instead of the preset, and the outputs play only what comes back " +
-      "over USB: with nothing coming back they are silent, so undo it to play on your own. Tried on a pedal: a DAW " +
-      "records a clean DI, and the outputs stay quiet until the computer sends something back." + DSP_NOTE,
+      "over USB: with nothing coming back they are silent. Tried on a pedal: a DAW records a clean DI, and the " +
+      "outputs stay quiet until the computer sends something back." + DSP_NOTE,
     base: "1.0.6",
     status: "ready",                                   // tried on a pedal, 2026-11-20
     // The other mod's two vmla -> vmul changes on top of the pack swaps above: the whole of what Valeton's own

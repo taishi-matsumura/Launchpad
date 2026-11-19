@@ -130,12 +130,28 @@ test("the DSP program's alternatives: what may be swapped in the USB routing lis
                    MODS.filter((m) => m.status !== "research").map((m) => m.id), "the built-in mods are USB routing choices");
 });
 
+// The routing list reads as two questions, because every title answers them in the same words: what the USB gets,
+// and what the outputs play. "monitoring" is in none of them on purpose (lib/mods.js says why: Valeton's own
+// Monitor Level is the gain of what comes back over USB, a knob anyone can turn, and these mods are not that).
+test("the USB routing titles: both answers, in the same words, and no routing twice", () => {
+  const shape = /^USB sends (the preset|the dry guitar), the outputs play (the pedal|only what comes back)$/;
+  const cells = new Set();
+  for (const m of dspAlternatives(MODS)) {
+    const two = shape.exec(m.title);
+    assert.ok(two, `"${m.title}" doesn't give both answers in the same words`);
+    cells.add(`${two[1]} -> ${two[2]}`);
+  }
+  assert.deepEqual([...cells].sort(), ["the dry guitar -> only what comes back", "the dry guitar -> the pedal",
+                                       "the preset -> only what comes back"]);
+  assert.ok(!cells.has("the preset -> the pedal"), "that one is Valeton's own, which isn't a mod: the screen's Valeton row says it");
+});
+
 // what this computer last wrote (the screen's only hint: the pedal can't tell us, lib/mods.js says why)
 const memStore = () => { const map = new Map(); return { getItem: (k) => (map.has(k) ? map.get(k) : null), setItem: (k, v) => map.set(k, String(v)), removeItem: (k) => map.delete(k) }; };
 test("what this Launchpad last wrote: a hint, kept on this computer", () => {
   const s = memStore();
   assert.equal(lastWritten(s), null);
-  const one = { id: "usb-dry-out", title: "USB sends the dry guitar", base: "1.0.6" };
+  const one = { id: "usb-dry-out", title: "USB sends the dry guitar, the outputs play the pedal", base: "1.0.6" };
   markWritten(s, one);
   assert.equal(lastWritten(s).id, "usb-dry-out");
   assert.ok(lastWritten(s).at, "it says when");
