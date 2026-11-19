@@ -24,13 +24,16 @@ const PATCHABLE = { app: 0x62, presets: 0x65, dsp: 0x63 };
 const BOOT_PATH = { 0x62: 0x100, 0x63: 0x400, 0x65: 0 };
 export const MOD_FORMAT = "gp5-mod";
 
+// Mods that change the same section are alternatives: installing one writes that whole section from the stock image
+// again, so the other's changes are gone. The two USB mods below say so in their summaries.
 export const MODS = [
   {
     id: "usb-no-passthrough",
     title: "USB audio interface, no direct monitoring",
-    summary: "The outputs play only the audio coming back over USB, not the guitar. USB recording doesn't change " +
-      "(channels 1/2: dry guitar, 3/4: the preset). With no audio coming back, the outputs are silent. Undo the mod to use " +
-      "the pedal on its own.",
+    summary: "The outputs play only the audio coming back over USB, not the guitar, so with nothing coming back they " +
+      "are silent. The recording doesn't change: the pedal still sends its preset (the host only sees two channels, so " +
+      "there is no dry channel to pick off). Undo the mod to use the pedal on its own. \"USB sends the dry guitar\" " +
+      "changes the other end of the same link: installing one puts the other back.",
     base: "1.0.6",
     // "research": being worked out, can't be installed; "untested": installable, not yet confirmed on a pedal;
     // "ready": confirmed on a pedal
@@ -46,9 +49,10 @@ export const MODS = [
   {
     id: "usb-dry-out",
     title: "USB sends the dry guitar",
-    summary: "The USB recording gets the dry guitar instead of the preset. The outputs still play the preset, " +
-      "so the pedal works on its own. Experimental: the two halves of the DSP's send block are swapped; confirm on a " +
-      "pedal that the USB input is really the dry signal.",
+    summary: "The USB recording gets the dry guitar instead of the preset. The outputs still play the preset, so the " +
+      "pedal works on its own. Experimental: the two halves of the DSP's send block are swapped; confirm on a pedal that " +
+      "the USB input is really the dry signal. \"USB audio interface, no direct monitoring\" changes the outputs instead " +
+      "of the send; installing one puts the other back.",
     base: "1.0.6",
     status: "untested",                                // not confirmed on a pedal yet (see the summary)
     // The DSP sends the control processor 512 bytes a block: 64 samples x 4 channels x 16 bit, really two stereo
