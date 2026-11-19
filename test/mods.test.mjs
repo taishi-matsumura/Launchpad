@@ -41,6 +41,16 @@ test("the USB-audio mod: two bytes of the DSP program, only there", { skip: !hav
   assert.deepEqual(stockSections(image, true).map(([t]) => t).sort((a, b) => a - b), [0x62, 0x63, 0x65]);
 });
 
+test("built-in mods survive being written to a mod file and read back", () => {
+  for (const m of MODS) {
+    const back = readModFile(modFile(m));
+    assert.equal(back.title, m.title);
+    assert.equal(back.summary, m.summary, `"${m.id}" tells too much for a mod file to hold`);
+    assert.deepEqual(back.patches.map((p) => [p.section, p.offset, Buffer.from(p.after).toString("hex")]),
+                     m.patches.map((p) => [p.section, p.offset, p.after]));
+  }
+});
+
 test("built-in mods in research can't be installed", () => {
   for (const m of MODS.filter((x) => x.status === "research")) assert.throws(() => buildMod(new Uint8Array(10), m), /isn't ready/);
 });
