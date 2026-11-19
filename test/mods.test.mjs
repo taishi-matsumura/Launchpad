@@ -45,6 +45,21 @@ test("built-in mods in research can't be installed", () => {
   for (const m of MODS.filter((x) => x.status === "research")) assert.throws(() => buildMod(new Uint8Array(10), m), /isn't ready/);
 });
 
+test("the dry-USB mod: two words of the DSP program, only there", { skip: !have && "no local stock firmware" }, () => {
+  const mod = MODS.find((m) => m.id === "usb-dry-out");
+  const built = buildMod(image, mod);
+  assert.deepEqual(built.sections.map(([t]) => t), [0x63]);
+  const orig = inspect(image).sections.find(([t]) => t === 0x63)[1], dsp = built.sections[0][1];
+  assert.deepEqual(dsp.subarray(0xB4C0, 0xB4C4), new Uint8Array([0x60, 0x1f, 0x00, 0x20]));   // 0x20001F60
+  assert.deepEqual(dsp.subarray(0xB904, 0xB908), new Uint8Array([0x60, 0x1d, 0x00, 0x20]));   // 0x20001D60
+  // the two halves swap places, nothing else moves, and the output mix is left as Valeton made it
+  const diffs = []; for (let i = 0; i < orig.length; i++) if (orig[i] !== dsp[i]) diffs.push(i);
+  assert.deepEqual(diffs, [0xB4C1, 0xB905]);
+  assert.equal(orig[0xB4C1], 0x1e); assert.equal(orig[0xB905], 0x1e);
+  assert.deepEqual(dsp.subarray(0xB8A4, 0xB8A8), orig.subarray(0xB8A4, 0xB8A8));
+  assert.deepEqual(dsp.subarray(0xB8CE, 0xB8D2), orig.subarray(0xB8CE, 0xB8D2));
+});
+
 test("building a mod from Valeton's image", { skip: !have && "no local stock firmware" }, () => {
   assert.equal(stockVersion(image), "1.0.6");
   const m = readModFile(enc({ ...base, patches: [TEXT] }));

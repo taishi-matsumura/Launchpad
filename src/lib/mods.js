@@ -43,6 +43,29 @@ export const MODS = [
       { section: 0x63, offset: 0xB8CE, before: "00ee810a", after: "20ee810a", note: "right output: USB return only (vmla -> vmul)" },
     ],
   },
+  {
+    id: "usb-dry-out",
+    title: "USB sends the dry guitar",
+    summary: "The USB recording gets the dry guitar instead of the preset. The outputs still play the preset, " +
+      "so the pedal works on its own. Experimental: the two halves of the DSP's send block are swapped; confirm on a " +
+      "pedal that the USB input is really the dry signal.",
+    base: "1.0.6",
+    status: "untested",                                // not confirmed on a pedal yet (see the summary)
+    // The DSP sends the control processor 512 bytes a block: 64 samples x 4 channels x 16 bit, really two stereo
+    // pairs. +0x000..0x0FF is mono (the same value in L and R, from (B - A) / 2), +0x100..0x1FF is the processed
+    // stereo output. The control processor only puts two of those four channels on USB, and today it sends the second
+    // half (the recording comes back as the preset). Swapping where the two pack loops write makes the half on USB
+    // the dry one. The output mix (0xB8A4 / 0xB8CE, the vmla the other mod changes) is left alone, so the outputs
+    // stay exactly as Valeton made them. Each patch is one literal in a ldr [pc, #..] pool: same length, no code moved.
+    // Known risks: +0x000..0x0FF being the dry guitar isn't proven (its source buffers are initialised by the DSP's
+    // resident ROM, which isn't in any image we have); the control processor may use the first half for something
+    // else; the 0xB4C0 literal is shared with three test-mode handlers (0xB114, 0xB1AA, 0xB220) that normal running
+    // never reaches, but if they did run they would write over the pointer array at 0x20002060.
+    patches: [
+      { section: 0x63, offset: 0xB4C0, before: "601e0020", after: "601f0020", note: "dry pack: write to the second half (0x20001E60 -> 0x20001F60)" },
+      { section: 0x63, offset: 0xB904, before: "601e0020", after: "601d0020", note: "preset pack: write to the first half (0x20001E60 -> 0x20001D60)" },
+    ],
+  },
 ];
 
 export class ModError extends Error {}
