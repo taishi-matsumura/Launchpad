@@ -12,7 +12,7 @@ the tools that fit what the pedal runs.
 | Presets | 8 presets: edit live with the pedal's own settings, name, rearrange, export and import | [Dreamcatcher](https://github.com/OpenGP5/Dreamcatcher) 1.2 |
 | Presets (Valeton) | the 100 stock presets: browse, edit every setting by name, hear changes live, rename, reset, export and import | Valeton firmware V1.0.6 |
 | Backups | one `.gp5backup` file with the installed firmware's data; restores onto the same firmware | OpenGP5 firmwares, Valeton firmware |
-| Mods | small patches for Valeton's firmware, applied to your own copy of it; undo puts the original back | Valeton firmware V1.0.6 |
+| Mods | small patches for Valeton's firmware, applied to your own copy of it; the four USB routing choices switch in a few seconds with the presets and settings left alone; undo puts the whole original back | Valeton firmware V1.0.6 |
 | Settings | theme (system, light, dark), update check, recovery steps | |
 
 > **Alpha.** Flashing can go wrong. Read OpenGP5's

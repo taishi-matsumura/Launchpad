@@ -1,7 +1,7 @@
 // Mods: changes to Valeton's stock firmware, built in or from shared .gp5mod files, installed from the user's own
 // stock image (lib/mods.js). Undo = put Valeton's original back from the same file.
 import * as F from "../lib/gp5flash.js";
-import { MODS, STOCK_DSP, buildMod, readModFile, stockSections, stockVersion, dspAlternatives, knownMod, lastWritten, markWritten } from "../lib/mods.js";
+import { MODS, STOCK_DSP, BUILT_INS, buildMod, readModFile, stockSections, stockVersion, dspAlternatives, knownMod, lastWritten, markWritten } from "../lib/mods.js";
 import { changeFirmware } from "../lib/change.js";
 import { catalogFromImage, saveCatalog, loadSavedCatalog } from "../lib/stockcat.js";
 import { backupNow } from "./backups.js";
@@ -30,6 +30,7 @@ function card(ctx, m, fromFile, alts) {
     ${m.summary ? `<p class="muted">${esc(m.summary)}</p>` : ""}
     ${ready ? `<p class="faint" style="font-size:12.5px">${fromFile ? `From a file${m.author ? ` by ${esc(m.author)}` : ""} · ` : ""}${changes} change${changes === 1 ? "" : "s"}, ${bytes} byte${bytes === 1 ? "" : "s"}</p>` : ""}
     ${fromFile ? `
+      ${m.warn ? `<p class="muted">${esc(m.warn)}</p>` : ""}
       ${m.patches.some((p) => p.note) ? `<ul class="muted" style="font-size:12.5px;margin:0 0 0 18px">${m.patches.filter((p) => p.note).slice(0, 8).map((p) => `<li>${esc(SECTION[p.section])} @ 0x${p.offset.toString(16)}: ${esc(p.note)}</li>`).join("")}</ul>` : ""}
       <div class="note warn">${icon("alert-triangle", 16)}<span>A mod file can change anything in the firmware it patches. Only install mods from people you trust. Recovery always works: hold the foot switch and PARA while plugging in.</span></div>` : ""}
     ${viaRouting ? `<p class="faint" style="font-size:12.5px">Switch this one in the USB routing list above: a few seconds for the ${DSP}, presets and settings stay. Install is here for a pedal that isn't running Valeton's firmware, where the whole firmware has to be rewritten instead.</p>` : ""}
@@ -42,15 +43,22 @@ const variants = (loaded) => [STOCK_DSP, ...dspAlternatives([...MODS, ...loaded]
 
 // One row of the USB routing list. The pill marks what this computer last wrote (lib/mods.js says why that's all
 // Launchpad can know); picking a row rewrites the DSP section from the user's stock image, so what's written is
-// right whatever the pill says.
-function altTile(ctx, m, cur, onStock, busy) {
+// right whatever the pill says. A row can also be a mod somebody shared as a file, which Launchpad has never seen
+// running: that's a pill of its own, and the mod's warn line (lib/mods.js) goes in the row too, because this button
+// is one click and a few seconds.
+function altTile(ctx, m, cur, onStock, busy, fromFile) {
   const { esc, icon } = ctx;
   const here = cur === m.id, stock = !!m.stockDsp;
   const sub = stock ? "USB sends the preset, the outputs play the pedal and what comes back: Valeton's own. Picking it "
                     + "puts any of these back, in the same few seconds."
-    : `${m.patches.length} change${m.patches.length === 1 ? "" : "s"} to Valeton V${esc(m.base)}`;
+    : [`${m.patches.length} change${m.patches.length === 1 ? "" : "s"} to Valeton V${esc(m.base)}`, m.warn && esc(m.warn)]
+        .filter(Boolean).join(" · ");
+  const pill = here ? '<span class="pill now">written here</span>'
+    : fromFile ? `<span class="pill">${icon("file-import", 13)} from a file${m.author ? ` by ${esc(m.author)}` : ""}</span>`
+    : m.status === "untested" ? '<span class="pill">not yet tested on a pedal</span>' : "";
   return `<div class="item tall${here ? " sel" : ""}"><span class="main">
-      <span class="name">${esc(m.title)}${here ? ' <span class="pill now">written here</span>' : ""}</span><span class="sub">${sub}</span></span>
+      <span class="name">${esc(m.title)}</span>${pill ? `<span class="row" style="gap:6px;margin-top:3px">${pill}</span>` : ""}
+      <span class="sub clamp2">${sub}</span></span>
     <button class="btn ${here ? "ghost" : "primary"}" data-alt="${esc(m.id)}" ${onStock && !busy ? "" : "disabled"}
       title="${onStock ? `Rewrite the whole ${DSP} from your Valeton file: presets and settings stay` : "Only for a pedal running Valeton's firmware"}">${icon("arrows-exchange", 15)} ${here ? "Write again" : "Switch"}</button></div>`;
 }
@@ -65,20 +73,23 @@ function routing(ctx, loaded) {
       settings and app only have levels. Every name says the two things that differ: what the pedal sends over USB
       (its preset, or the dry guitar) and what the outputs play (the pedal, or only what the computer sends back).
       Picking one rewrites the ${DSP} from Valeton's file on this computer: a few
-      seconds, and the presets and settings stay. The Valeton row writes Valeton's own program back the same way, so
+      seconds, and the presets and settings stay. Where one needs saying — that the outputs go quiet until the
+      computer sends something back — the row says it, and says it again before writing; a row that came from
+      somebody's file is marked as one. The Valeton row writes Valeton's own program back the same way, so
       it puts any of these back; the Undo below also rewrites the app and preset parts, for a mod that changed those.
       The pedal can't say what it runs now, so Launchpad only says what it wrote here itself${wrote ? `, ${esc(String(wrote.at || "").slice(0, 10))}` : ""}.</p>
     ${onStock ? "" : `<div class="note warn">${icon("info-circle", 16)}<span>Pick one of these when the pedal is running Valeton's firmware${state.pedal ? " — this one isn't, so its whole firmware would have to be rewritten, which is what the buttons below do" : ""}.</span></div>`}
-    <div class="list" style="margin-top:10px">${alts.map((m) => altTile(ctx, m, cur, onStock, state.busy)).join("")}</div></section>`;
+    <div class="list" style="margin-top:10px">${alts.map((m) => altTile(ctx, m, cur, onStock, state.busy, loaded.some((x) => x.id === m.id))).join("")}</div></section>`;
 }
 
 // Opening a .gp5mod file. A mod's id is its name, so a file that carries one Launchpad already has doesn't join the
 // list as another row: with the same changes it is the same mod under another (often older) name, and Launchpad's
 // own row is the one that shows and writes it; with different changes it is a different mod that has to say so in a
 // new id, because a row can't promise bytes it doesn't write. Returns { mod, note }: the mod to add, and what to
-// say instead of adding it.
-export function loadModFile(bytes) {
-  const m = readModFile(bytes), known = knownMod(m);
+// say instead of adding it. The files already open count as ones Launchpad has: without them, opening a second file
+// with the same id would swap the first out without a word.
+export function loadModFile(bytes, loaded = []) {
+  const m = readModFile(bytes), known = knownMod(m, [...BUILT_INS, ...loaded]);
   if (!known) return { mod: m, note: null };
   return { mod: null, note: known.why === "same"
     ? { ok: true, text: `Launchpad already has this mod: "${known.mod.title}". The file changes the same bytes, so it is the same mod under another name: nothing to add to the list, and its row above writes it.` }
@@ -149,7 +160,7 @@ export default {
       const changes = mod.stockDsp ? `This is Valeton's firmware V${mod.base} as it came, checked against your file.`
         : `${built.plan.length} change${built.plan.length === 1 ? "" : "s"} (${built.bytes} byte${built.bytes === 1 ? "" : "s"}) to Valeton's firmware V${mod.base}, checked against your file.`;
       if (!(await ctx.confirm(`Write "${mod.title}" into the pedal?`,
-            `${changes}\n\n` +
+            `${changes}\n\n` + (mod.warn ? `${mod.warn}\n\n` : "") +
             `Launchpad rewrites the whole ${DSP} from your file, and the pedal restarts when it is done. Valeton's presets and settings stay.`, "Write"))) return;
       if (await flashIt(built.sections, { kind: "stock", title: `Valeton's firmware with "${mod.title}"` }, `"${mod.title}" is in the pedal's DSP program.`)) mark(mod);
     };
@@ -157,7 +168,7 @@ export default {
       const f = await ctx.openFile("Open a mod file", [{ name: "GP-5 mod", extensions: ["gp5mod"] }]);
       if (!f) return;
       try {
-        const r = loadModFile(f.bytes);
+        const r = loadModFile(f.bytes, ui.loaded);
         if (r.mod) ui.loaded = [...ui.loaded.filter((x) => x.id !== r.mod.id), r.mod];
         ui.result = r.note;
       } catch (e) { ui.result = { ok: false, text: e.message }; }
@@ -179,6 +190,7 @@ export default {
       const sections = onStock ? built.sections : built.all;
       const ok = await ctx.confirm(`Install "${mod.title}"?`,
         `${built.plan.length} change${built.plan.length === 1 ? "" : "s"} (${built.bytes} byte${built.bytes === 1 ? "" : "s"}) to Valeton's firmware V${mod.base}, checked against your file.\n\n` +
+        (mod.warn ? `${mod.warn}\n\n` : "") +
         (onStock ? `Launchpad flashes ${sections.map(([t]) => SECTION[t]).join(" and ")} only. Valeton's presets stay.`
                  : "The pedal isn't running Valeton's firmware, so Launchpad flashes the whole firmware (with the mod)."), "Install");
       if (!ok) return;

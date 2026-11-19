@@ -18,6 +18,8 @@ test("mod files: read, write, refuse what isn't allowed", () => {
   const m = readModFile(enc({ ...base, patches: [TEXT] }));
   assert.equal(m.patches[0].offset, 0x102AEC);
   assert.deepEqual(readModFile(modFile(m)).patches[0].after, m.patches[0].after);
+  assert.equal(m.warn, "", "a file that says nothing extra about playing through it");
+  assert.equal(readModFile(modFile(MODS[0])).warn, MODS[0].warn, "a mod's warn line travels in the file");
   const bad = (patches, re, extra = {}) => assert.throws(() => readModFile(enc({ ...base, ...extra, patches })), re);
   bad([TEXT], /doesn't know/, { base: "9.9" });
   bad([], /changes nothing/);
@@ -146,6 +148,18 @@ test("the USB routing titles: both answers, in the same words, and no routing tw
   assert.ok(!cells.has("the preset -> the pedal"), "that one is Valeton's own, which isn't a mod: the screen's Valeton row says it");
 });
 
+// Two of those three leave the outputs playing nothing but what the computer sends back, which is the one thing a
+// player can be caught out by: switching is one click and a few seconds, and unplugging the USB cable doesn't undo
+// it. So the mod says it once in its own words (lib/mods.js "warn"), and the screen repeats that in the routing row
+// and in the confirm, where the click happens.
+test("the mods that leave the pedal silent say so, and the one that doesn't stays quiet", () => {
+  for (const m of dspAlternatives(MODS)) {
+    const silent = /only what comes back$/.test(m.title);
+    if (silent) assert.match(m.warn || "", /silent|quiet/, `"${m.title}": the row and the confirm warn, because the pedal makes no sound on its own`);
+    else assert.ok(!m.warn, `"${m.title}": the outputs still play the pedal, so there is nothing to warn about`);
+  }
+});
+
 // One mod, one row. A mod's id is its name, so a shared .gp5mod file that carries a built-in mod's id is either the
 // same mod under older words (then Launchpad's own copy is the one to show: its name is the current one, and two
 // rows would only be two ways of writing the same bytes) or a different mod wearing another mod's name (then it
@@ -189,6 +203,13 @@ test("opening a mod file the Mods screen already has: one row, Launchpad's name"
   const fresh = loadModFile(enc({ ...base, id: "quiet", title: "Quiet", patches: [TEXT] }));
   assert.equal(fresh.mod.id, "quiet", "a mod Launchpad doesn't know still joins the list");
   assert.equal(fresh.note, null, "with nothing to explain");
+  const other = loadModFile(enc({ ...JSON.parse(new TextDecoder().decode(modFile(fresh.mod))), patches: [{ ...TEXT, after: "54657374696e67203133" }] }), [fresh.mod]);
+  assert.equal(other.mod, null, "a second file with that id doesn't swap the first out without a word");
+  assert.equal(other.note.ok, false, "and it's the same clash as with a built-in mod");
+  const twice = loadModFile(enc({ ...base, id: "quiet", title: "Quiet under another name", patches: [TEXT] }), [fresh.mod]);
+  assert.equal(twice.mod, null, "the same file opened twice is one row");
+  assert.ok(twice.note.ok, "said as news, not as an error");
+  assert.match(twice.note.text, /Quiet(?! under)/, "the row that stays is the one already open, not the file's newer name");
 });
 
 // what this computer last wrote (the screen's only hint: the pedal can't tell us, lib/mods.js says why)

@@ -5,9 +5,12 @@
 //
 // Mods come built in (MODS) or as files anyone can share (.gp5mod, JSON):
 //   { "format": "gp5-mod", "version": 1, "id": "short-name", "title": "...", "summary": "...", "author": "...",
-//     "base": "1.0.6",
+//     "base": "1.0.6", "warn": "optional: what playing through this is like, said again before it is written",
 //     "patches": [ { "section": "app" | "presets" | "dsp", "offset": 1234 | "0x4d2", "before": "hex", "after": "hex",
 //                    "note": "what this changes" } ] }
+//
+// "warn" is one sentence the pedal can't tell us and the summary may bury: the Mods screen's USB routing row shows
+// it and says it again in the confirm, because switching there is one click and a few seconds.
 //
 // A mod's id is its name, and the list has one row per name: a file that carries a built-in mod's id is the same
 // mod (Launchpad shows its own copy, whose words are the current ones) or a different mod that needs a new id.
@@ -50,6 +53,7 @@ export const MODS = [
     summary: "The outputs play only what comes back over USB, not the guitar, so with nothing coming back they are " +
       "silent. The recording doesn't change: the pedal still sends its preset (two channels, no dry channel to pick " +
       "off)." + DSP_NOTE,
+    warn: "With nothing coming back over USB the outputs are silent: the pedal makes no sound of its own.",
     base: "1.0.6",
     // "research": being worked out, can't be installed; "untested": installable, not yet confirmed on a pedal;
     // "ready": confirmed on a pedal
@@ -97,6 +101,7 @@ export const MODS = [
     summary: "The USB recording gets the dry guitar instead of the preset, and the outputs play only what comes back " +
       "over USB: with nothing coming back they are silent. Tried on a pedal: a DAW records a clean DI, and the " +
       "outputs stay quiet until the computer sends something back." + DSP_NOTE,
+    warn: "With nothing coming back over USB the outputs are silent: the pedal makes no sound of its own.",
     base: "1.0.6",
     status: "ready",                                   // tried on a pedal, 2026-11-20
     // The other mod's two vmla -> vmul changes on top of the pack swaps above: the whole of what Valeton's own
@@ -128,7 +133,7 @@ export function readModFile(bytes) {
   if (o.version !== 1) throw new ModError("This mod file was made for a newer Launchpad.");
   const text = (v, max) => (typeof v === "string" ? v.replace(/[\u0000-\u001f]/g, " ").trim().slice(0, max) : "");
   const mod = { id: text(o.id, 40) || "mod", title: text(o.title, 80) || "Unnamed mod", summary: text(o.summary, 400), author: text(o.author, 80),
-                base: text(o.base, 12), status: "file", patches: [] };
+                warn: text(o.warn, 200), base: text(o.base, 12), status: "file", patches: [] };
   if (!STOCK[mod.base]) throw new ModError(`This mod is for Valeton's firmware V${mod.base || "?"}, which Launchpad doesn't know.`);
   if (!Array.isArray(o.patches) || !o.patches.length) throw new ModError("This mod changes nothing.");
   if (o.patches.length > 4096) throw new ModError("This mod has too many changes.");
@@ -151,14 +156,15 @@ export function readModFile(bytes) {
 const changeSet = (mod) => new Set((mod.patches || []).map((p) => `${p.section}@${p.offset}:${hxBytes(asBytes(p.before))}>${hxBytes(asBytes(p.after))}`));
 const hxBytes = (b) => Array.from(b, (v) => v.toString(16).padStart(2, "0")).join("");
 
-// A mod file meeting the mods Launchpad already knows: the built-in ones and Valeton's own row. A mod's id is its
-// name, so the same id means the same thing, and files get shared around with names Launchpad has stopped using:
+// A mod file meeting the mods Launchpad already has a row for: the built-in ones, Valeton's own row, and the files
+// already open (the screen passes those in, or one file would quietly replace another with the same id). A mod's id
+// is its name, so the same id means the same thing, and files get shared around with names Launchpad stopped using:
 //   "same"  the file changes exactly the bytes one of ours changes. Same mod, older words: show ours, whose name and
 //           summary are the current ones, and don't add a second row that writes the same thing.
 //   "clash" the same id with different changes: a different mod wearing another mod's name. No row could say what it
 //           writes honestly, and one id in two rows would make the USB routing list ambiguous, so it doesn't go in.
 //   null    a name Launchpad doesn't have: the file's mod is new and belongs in the list.
-export function knownMod(mod, builtIn = [STOCK_DSP, ...MODS]) {
+export function knownMod(mod, builtIn = BUILT_INS) {
   const known = builtIn.find((m) => m.id === mod.id);
   if (!known) return null;
   const ours = changeSet(known), theirs = changeSet(mod);
@@ -169,7 +175,7 @@ export function knownMod(mod, builtIn = [STOCK_DSP, ...MODS]) {
 // A mod file for a mod (for sharing / the tests).
 export function modFile(mod) {
   const name = Object.fromEntries(Object.entries(PATCHABLE).map(([k, v]) => [v, k]));
-  return new TextEncoder().encode(JSON.stringify({ format: MOD_FORMAT, version: 1, id: mod.id, title: mod.title, summary: mod.summary, author: mod.author || "",
+  return new TextEncoder().encode(JSON.stringify({ format: MOD_FORMAT, version: 1, id: mod.id, title: mod.title, summary: mod.summary, author: mod.author || "", warn: mod.warn || "",
     base: mod.base, patches: mod.patches.map((p) => ({ section: name[p.section], offset: "0x" + p.offset.toString(16), before: hxBytes(asBytes(p.before)), after: hxBytes(asBytes(p.after)), note: p.note || "" })) }, null, 1) + "\n");
 }
 const asBytes = (v) => (v instanceof Uint8Array ? v : hexBytes(v, "patch"));
@@ -189,6 +195,10 @@ export function stockVersion(imageBytes) {
 // pedal running Valeton's firmware that is all a routing switch needs; Undo is still there for a mod that changed
 // the app, and it is the one that verifies every section of the image.
 export const STOCK_DSP = { id: "stock", stockDsp: true, status: "ready", base: "1.0.6", title: "Valeton's original, no mods", patches: [] };
+
+// What Launchpad has a row for before anyone opens a file: Valeton's own row and the built-in mods. A file's id is
+// checked against these (plus whatever files are already open) by knownMod() below.
+export const BUILT_INS = [STOCK_DSP, ...MODS];
 
 // Check a stock image for a mod and build the sections to flash: [[type, data]] plus a readable plan.
 // Throws ModError with a plain reason; nothing is changed unless every check passes.
