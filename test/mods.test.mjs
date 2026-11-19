@@ -45,20 +45,24 @@ test("built-in mods in research can't be installed", () => {
   for (const m of MODS.filter((x) => x.status === "research")) assert.throws(() => buildMod(new Uint8Array(10), m), /isn't ready/);
 });
 
-test("the dry-USB mod: two words of the DSP program, only there", { skip: !have && "no local stock firmware" }, () => {
+test("the dry-USB mod: four words of the DSP program, only there", { skip: !have && "no local stock firmware" }, () => {
   const mod = MODS.find((m) => m.id === "usb-dry-out");
   const built = buildMod(image, mod);
   assert.deepEqual(built.sections.map(([t]) => t), [0x63]);
   const orig = inspect(image).sections.find(([t]) => t === 0x63)[1], dsp = built.sections[0][1];
   assert.deepEqual(dsp.subarray(0xB4C0, 0xB4C4), new Uint8Array([0x60, 0x1f, 0x00, 0x20]));   // 0x20001F60
   assert.deepEqual(dsp.subarray(0xB904, 0xB908), new Uint8Array([0x60, 0x1d, 0x00, 0x20]));   // 0x20001D60
-  // the two halves swap places, nothing else moves, and the output mix is left as Valeton made it
+  for (const at of [0xB8A4, 0xB8CE]) assert.deepEqual(dsp.subarray(at, at + 4), new Uint8Array([0x20, 0xee, 0x81, 0x0a]));
+  // the two halves swap places and both output channels become the return on its own; nothing else moves
   const diffs = []; for (let i = 0; i < orig.length; i++) if (orig[i] !== dsp[i]) diffs.push(i);
-  assert.deepEqual(diffs, [0xB4C1, 0xB905]);
+  assert.deepEqual(diffs, [0xB4C1, 0xB8A4, 0xB8CE, 0xB905]);
   assert.equal(orig[0xB4C1], 0x1e); assert.equal(orig[0xB905], 0x1e);
-  assert.deepEqual(dsp.subarray(0xB8A4, 0xB8A8), orig.subarray(0xB8A4, 0xB8A8));
-  assert.deepEqual(dsp.subarray(0xB8CE, 0xB8D2), orig.subarray(0xB8CE, 0xB8D2));
+  // the output mix here is the same two changes "USB audio interface, no direct monitoring" makes, plus the send
+  const other = buildMod(image, MODS.find((m) => m.id === "usb-no-passthrough")).sections[0][1];
+  for (const at of [0xB8A4, 0xB8CE]) assert.deepEqual(dsp.subarray(at, at + 4), other.subarray(at, at + 4));
+  assert.deepEqual(other.subarray(0xB4C0, 0xB4C4), orig.subarray(0xB4C0, 0xB4C4));   // that mod leaves the packs alone
 });
+
 
 test("building a mod from Valeton's image", { skip: !have && "no local stock firmware" }, () => {
   assert.equal(stockVersion(image), "1.0.6");

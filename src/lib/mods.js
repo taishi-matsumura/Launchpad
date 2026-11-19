@@ -30,10 +30,10 @@ export const MODS = [
   {
     id: "usb-no-passthrough",
     title: "USB audio interface, no direct monitoring",
-    summary: "The outputs play only the audio coming back over USB, not the guitar, so with nothing coming back they " +
-      "are silent. The recording doesn't change: the pedal still sends its preset (the host only sees two channels, so " +
-      "there is no dry channel to pick off). Undo the mod to use the pedal on its own. \"USB sends the dry guitar\" " +
-      "changes the other end of the same link: installing one puts the other back.",
+    summary: "The outputs play only what comes back over USB, not the guitar, so with nothing coming back they are " +
+      "silent. The recording doesn't change: the pedal still sends its preset (two channels, no dry channel to pick " +
+      "off). Undo it to use the pedal on its own. \"USB sends the dry guitar, the outputs play what comes back\" " +
+      "changes the send as well: installing one puts this back.",
     base: "1.0.6",
     // "research": being worked out, can't be installed; "untested": installable, not yet confirmed on a pedal;
     // "ready": confirmed on a pedal
@@ -48,28 +48,36 @@ export const MODS = [
   },
   {
     id: "usb-dry-out",
-    title: "USB sends the dry guitar",
-    summary: "The USB recording gets the dry guitar instead of the preset. The outputs still play the preset, so the " +
-      "pedal works on its own. Tried on a pedal: a DAW records a clean DI of the guitar, without the preset's sound. " +
-      "\"USB audio interface, no direct monitoring\" changes the outputs instead of the send; installing one puts the " +
-      "other back.",
+    title: "USB sends the dry guitar, the outputs play what comes back",
+    summary: "The USB recording gets the dry guitar instead of the preset, and the outputs play only what comes back " +
+      "over USB: with nothing coming back they are silent, so undo it to play on your own. With the outputs left as " +
+      "Valeton made them, a pedal records a clean DI in a DAW, without the preset's sound. \"USB audio interface, no " +
+      "direct monitoring\" sends the preset: installing one puts the other back.",
     base: "1.0.6",
-    status: "ready",                                   // tried on a pedal, 2026-11-19
+    status: "untested",                                // the send alone was confirmed on a pedal, 2026-11-19
     // The DSP sends the control processor 512 bytes a block: 64 samples x 4 channels x 16 bit, really two stereo
     // pairs. +0x000..0x0FF is mono (the same value in L and R, from (B - A) / 2), +0x100..0x1FF is the processed
     // stereo output. The control processor only puts two of those four channels on USB, and today it sends the second
     // half (the recording comes back as the preset). Swapping where the two pack loops write makes the half on USB
-    // the dry one. The output mix (0xB8A4 / 0xB8CE, the vmla the other mod changes) is left alone, so the outputs
-    // stay exactly as Valeton made them. Each patch is one literal in a ldr [pc, #..] pool: same length, no code moved.
-    // A pedal confirms it (2026-11-19): the half the control processor puts on USB is the dry guitar (a clean DI in a
-    // DAW) while the outputs keep the preset. What is still not proven: why it is dry (the first half's source buffers
-    // are initialised by the DSP's resident ROM, which isn't in any image we have), and whether the control processor
-    // reads the first half anywhere else. The 0xB4C0 literal is shared with three test-mode handlers (0xB114, 0xB1AA,
+    // the dry one. Each of those two patches is one literal in a ldr [pc, #..] pool (the loop stores to
+    // [base, r0, lsl #2]), so same length, no code moved.
+    // The other two are in the output mix loop 0xB880..0xB8E2: 64 turns over interleaved L/R pairs in the frame at
+    // sp+0x504, vmla.f32 s0, s1, s2 (out += return * gain; s1 is the USB return sample) once per channel, at 0xB8A4
+    // (left) and 0xB8CE (right). vmul.f32 makes it out = return * gain, the same change "USB audio interface, no
+    // direct monitoring" makes, so the outputs carry nothing of the guitar or of the preset.
+    // The send on its own was confirmed on a pedal (2026-11-19): the half the control processor puts on USB is the
+    // dry guitar (a clean DI in a DAW) while the outputs keep the preset. The four together have not been on a pedal.
+    // What is still not proven: why it is dry (the first half's source buffers are initialised by the DSP's resident
+    // ROM, which isn't in any image we have), whether the control processor reads the first half anywhere else, and
+    // whether the dry pack reads the same frame the output mix loop writes (if it did, the USB would carry the
+    // return rather than the dry guitar). The 0xB4C0 literal is shared with three test-mode handlers (0xB114, 0xB1AA,
     // 0xB220) that normal running never reaches; if they did run they would write over the pointer array at
     // 0x20002060, which sits right after the block (no room to spare).
     patches: [
       { section: 0x63, offset: 0xB4C0, before: "601e0020", after: "601f0020", note: "dry pack: write to the second half (0x20001E60 -> 0x20001F60)" },
       { section: 0x63, offset: 0xB904, before: "601e0020", after: "601d0020", note: "preset pack: write to the first half (0x20001E60 -> 0x20001D60)" },
+      { section: 0x63, offset: 0xB8A4, before: "00ee810a", after: "20ee810a", note: "left output: USB return only (vmla -> vmul)" },
+      { section: 0x63, offset: 0xB8CE, before: "00ee810a", after: "20ee810a", note: "right output: USB return only (vmla -> vmul)" },
     ],
   },
 ];
