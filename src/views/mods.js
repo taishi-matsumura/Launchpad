@@ -12,24 +12,31 @@ const DSP = "DSP program (49,992 bytes)";
 const raw = (b) => (typeof b === "string" ? b.replace(/\s+/g, "").match(/../g).map((x) => parseInt(x, 16)) : Array.from(b));
 const changed = (p) => { const a = raw(p.before), b = raw(p.after); return a.filter((v, i) => v !== b[i]).length; };
 
-function card(ctx, m, fromFile) {
+// What a mod changes, and the way back when it isn't in the routing list; the routing list itself is the one that
+// picks between the mods that only change the DSP program, so on a pedal running Valeton's firmware its Install
+// button would only be a slower way of pressing the row above.
+function card(ctx, m, fromFile, alts) {
   const { esc, icon, state } = ctx, ready = m.status !== "research";
   const changes = ready ? m.patches.length : 0, bytes = m.patches.reduce((n, p) => n + changed(p), 0);
+  const onStock = state.pedal?.mode === F.MODE_STOCK;
+  const viaRouting = onStock && alts.some((x) => x.id === m.id);
+  const remove = `<button class="btn ghost" data-drop="${esc(m.id)}">Remove from the list</button>`;
+  const buttons = !ready ? `<div class="note">${icon("info-circle", 16)}<span>Not available yet.</span></div>`
+    : viaRouting ? (fromFile ? `<div class="row">${remove}</div>` : "")
+    : `<div class="row"><button class="btn primary" data-mod="${esc(m.id)}" data-file="${fromFile ? 1 : 0}" ${state.pedal && !state.busy ? "" : "disabled"}>${icon("download")} Install</button>${fromFile ? ` ${remove}` : ""}</div>`;
   return `<section class="card w-mods"><div class="stack">
     <div class="card-head" style="margin-bottom:0"><h2>${icon("puzzle", 18)} ${esc(m.title)}</h2>
-      <span class="row" style="gap:6px">${m.status === "untested" ? '<span class="pill">not yet tested on a pedal</span>' : ""}<span class="pill world">${ready ? `for Valeton V${esc(m.base)}` : "in research"}</span></span></div>
+      <span class="row" style="gap:6px">${m.status === "untested" ? '<span class="pill">not yet tested on a pedal</span>' : ""}<span class="pill world">${ready ? `for Valeton V${esc(m.base)}` : "in research"}</span>${viaRouting ? `<span class="pill">${icon("arrows-exchange", 13)} USB routing</span>` : ""}</span></div>
     ${m.summary ? `<p class="muted">${esc(m.summary)}</p>` : ""}
     ${ready ? `<p class="faint" style="font-size:12.5px">${fromFile ? `From a file${m.author ? ` by ${esc(m.author)}` : ""} · ` : ""}${changes} change${changes === 1 ? "" : "s"}, ${bytes} byte${bytes === 1 ? "" : "s"}</p>` : ""}
     ${fromFile ? `
       ${m.patches.some((p) => p.note) ? `<ul class="muted" style="font-size:12.5px;margin:0 0 0 18px">${m.patches.filter((p) => p.note).slice(0, 8).map((p) => `<li>${esc(SECTION[p.section])} @ 0x${p.offset.toString(16)}: ${esc(p.note)}</li>`).join("")}</ul>` : ""}
       <div class="note warn">${icon("alert-triangle", 16)}<span>A mod file can change anything in the firmware it patches. Only install mods from people you trust. Recovery always works: hold the foot switch and PARA while plugging in.</span></div>` : ""}
-    ${ready ? `<div class="row"><button class="btn primary" data-mod="${esc(m.id)}" data-file="${fromFile ? 1 : 0}" ${state.pedal && !state.busy ? "" : "disabled"}>${icon("download")} Install</button>
-        ${fromFile ? `<button class="btn ghost" data-drop="${esc(m.id)}">Remove from the list</button>` : ""}</div>`
-      : `<div class="note">${icon("info-circle", 16)}<span>Not available yet.</span></div>`}
+    ${viaRouting ? `<p class="faint" style="font-size:12.5px">Switch this one in the USB routing list above: a few seconds for the ${DSP}, presets and settings stay. Install is here for a pedal that isn't running Valeton's firmware, where the whole firmware has to be rewritten instead.</p>` : ""}
+    ${buttons}
   </div></section>`;
 }
 
-// The alternatives that only change the DSP program, plus Valeton's original as the choice that is not a mod.
 // The alternatives that only change the DSP program, plus Valeton's own DSP program as the choice that isn't a mod.
 const variants = (loaded) => [STOCK_DSP, ...dspAlternatives([...MODS, ...loaded])];
 
@@ -65,13 +72,13 @@ function routing(ctx, loaded) {
 export default {
   id: "mods", title: "Mods", icon: "puzzle", world: "w-mods",
   render(ctx) {
-    const { esc, icon, state } = ctx, all = [...MODS, ...ui.loaded];
+    const { esc, icon, state } = ctx, all = [...MODS, ...ui.loaded], alts = variants(ui.loaded);
     return ctx.banner("w-mods", "puzzle", "Mods", "",
         { chips: [`${all.length} mod${all.length === 1 ? "" : "s"}`, `${all.filter((m) => m.status !== "research").length} ready`,
-                  `${variants(ui.loaded).length} USB routing choices`],
+                  `${alts.length} USB routing choices`],
           actions: `<button class="btn" data-act="file">${icon("file-import", 16)} Open a mod file</button>` }) + `
-      <p class="muted" style="margin:0 0 10px">Mods that change the same part of the firmware are alternatives: installing one puts the others back.</p>
-      <div class="stack">${routing(ctx, ui.loaded)}${MODS.map((m) => card(ctx, m, false)).join("")}${ui.loaded.map((m) => card(ctx, m, true)).join("")}
+      <p class="muted" style="margin:0 0 10px">Mods that change the same part of the firmware are alternatives: picking one puts the others back.</p>
+      <div class="stack">${routing(ctx, ui.loaded)}${MODS.map((m) => card(ctx, m, false, alts)).join("")}${ui.loaded.map((m) => card(ctx, m, true, alts)).join("")}
         ${ui.progress ? `<div class="card"><p class="muted" style="font-size:13px;margin-bottom:6px">${esc(ui.progress.label)}</p><progress max="1" value="${ui.progress.f}"></progress></div>` : ""}
         ${ui.result ? `<div class="note ${ui.result.ok ? "good" : "bad"}">${icon(ui.result.ok ? "circle-check" : "alert-triangle", 16)}<span style="white-space:pre-wrap">${esc(ui.result.text)}</span></div>` : ""}
         ${ui.log.length ? `<div class="log">${esc(ui.log.join("\n"))}</div>` : ""}
