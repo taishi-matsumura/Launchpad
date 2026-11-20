@@ -37,6 +37,7 @@ export class StockModel {
     this.banks = { 0x24: Array.from({ length: 80 }, (_, i) => (i % 3 === 0 && i < 30 ? `Tone ${i + 1}` : null)),
                    0x20: Array.from({ length: 20 }, (_, i) => (i < 4 ? `Cab IR ${i + 1}` : null)) };
     this.flashWrites = 0; this.dropEvery = 0; this.seen = 0; this.log = []; this.failNextWrite = false; this.corruptNextWrite = false;
+    this.globals = new Map();                     // SET_GLOBAL (11 11 a b 00 00 u32) values written since boot
   }
   read(n) {                                       // §3.3
     const slot = this.map[n];
@@ -97,10 +98,17 @@ export class StockModel {
           return this.reply(r);
         }
         case 0x43: return this.reply(Uint8Array.from([0x12, 0x43, this.current & 0xFF, this.current >> 8]));
-        case 0x10: {                              // globals: a few of the real items, 0x0202 = output level × 100
-          const items = [[0x0101, 0x01010006], [0x0102, 1], [0x0202, this.level ?? 70], [0x0203, 64]], r = new Uint8Array(2 + 8 * items.length);
-          r[0] = 0x12; r[1] = 0x10; const v = new DataView(r.buffer);
-          items.forEach(([id, x], i) => { v.setUint16(2 + 8 * i, id, true); v.setUint16(4 + 8 * i, 4, true); v.setInt32(6 + 8 * i, x, true); });
+        case 0x10: {                              // globals: a few of the real items, 0x0202 = output level × 100,
+                                                 // the unmapped GP-5 records (sizes as captured on a real pedal,
+                                                 // linkprobe.js PROBE_RECORDS) and whatever SET_GLOBAL wrote
+          const le = (x) => [x & 0xFF, (x >> 8) & 0xFF, (x >> 16) & 0xFF, (x >> 24) & 0xFF];
+          const items = [[0x0101, 4, le(0x01010006)], [0x0102, 4, le(1)], [0x0202, 4, le(this.level ?? 70)], [0x0203, 4, le(64)]];
+          for (const p of [[0x0407, 2, [3, 0]], [0x0404, 1, [1]], [0x0403, 1, [1]], [0x0201, 1, [0]]])
+            if (!this.globals.has(p[0])) items.push(p);
+          for (const [id, x] of this.globals) items.push([id, 4, le(x)]);
+          const r = new Uint8Array(2 + items.reduce((n, [, s]) => n + 4 + s, 0));
+          r[0] = 0x12; r[1] = 0x10; let o = 2;
+          for (const [id, s, val] of items) { r[o] = id & 0xFF; r[o + 1] = id >> 8; r[o + 2] = s; r.set(val, o + 4); o += 4 + s; }
           return this.reply(r);
         }
         case 0x45: return this.reply(Uint8Array.from([0x12, 0x45, this.dirty ? 1 : 0]));
@@ -159,6 +167,7 @@ export class StockModel {
       case 0x49: { const b = msg[2]; if (b < 10) { this.edit.mask = u32(6) ? this.edit.mask | (1 << b) : this.edit.mask & ~(1 << b); this.dirty = true; } return ok(); }
       case 0x44: this.edit.order = Array.from(msg.subarray(2, 12)); this.dirty = true; return ok();
       case 0x42: if (u16(2) === 0x2001) { this.edit.volume = Math.min(100, msg[6]); this.dirty = true; } return ok();
+      case 0x11: this.globals.set(u16(2), u32(6)); return ok();   // SET_GLOBAL (11 11 a b 00 00 u32): store and answer
       default: return ok();
     }
   }

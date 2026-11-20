@@ -4,9 +4,13 @@ import * as F from "../lib/gp5flash.js";
 import { MODS, STOCK_DSP, BUILT_INS, buildMod, readModFile, stockSections, stockVersion, dspAlternatives, knownMod, lastWritten, markWritten } from "../lib/mods.js";
 import { changeFirmware } from "../lib/change.js";
 import { catalogFromImage, saveCatalog, loadSavedCatalog } from "../lib/stockcat.js";
+import { readGlobals, command } from "../lib/stockpresets.js";
+import { cmd } from "../lib/device.js";
+import * as P from "../lib/linkprobe.js";
 import { backupNow } from "./backups.js";
 
 const ui = { result: null, log: [], progress: null, loaded: [] };
+const pr = { vals: null, log: [], watch: false, timer: null, ticking: false };   // the DSP link probe console
 const SECTION = { 0x62: "app", 0x65: "presets", 0x63: "DSP" };
 const DSP = "DSP program (49,992 bytes)";
 const raw = (b) => (typeof b === "string" ? b.replace(/\s+/g, "").match(/../g).map((x) => parseInt(x, 16)) : Array.from(b));
@@ -82,6 +86,46 @@ function routing(ctx, loaded) {
     <div class="list" style="margin-top:10px">${alts.map((m) => altTile(ctx, m, cur, onStock, state.busy, loaded.some((x) => x.id === m.id))).join("")}</div></section>`;
 }
 
+// The DSP link probe console (T2 research): Valeton's DSP has USB routing modes and its app firmware keeps the
+// mode in one saved byte, pushed to the DSP as link frame 0x6001 — by a screen inside the pedal and at power-on,
+// never from USB (lib/linkprobe.js says what the disassembly showed and what this console can still ask).
+function probeConsole(ctx) {
+  const { esc, icon, state } = ctx, live = !!state.link && !state.busy;
+  const rows = P.PROBE_RECORDS.map((r) => {
+    const v = pr.vals ? pr.vals.get(r.id) : undefined;
+    return `<div class="item"><span class="main"><span class="name">${esc(P.recName(r.id))}${v !== undefined ? ` = ${esc(P.fmtValue(v))}` : " (not read yet)"}</span>
+        ${r.note ? `<span class="sub">${esc(r.note)}</span>` : ""}</span>
+      <span class="row" style="gap:6px"><select data-rec="${r.id}" aria-label="value for record ${esc(P.recName(r.id))}">${
+        [0, 1, 2, 3].map((x) => `<option value="${x}"${x === r.def ? " selected" : ""}>${x}</option>`).join("")}</select>
+        <button class="btn" data-set="${r.id}" ${live ? "" : "disabled"}>${icon("upload", 15)} Write</button></span></div>`;
+  }).join("");
+  const frames = [...P.MODE_FRAMES, P.DSP_PING].map((f, i) =>
+    `<button class="btn ghost" data-frame="${i}" ${live ? "" : "disabled"} title="7E 00 ${esc(P.hex(f.payload.slice(2)))} — only OpenGP5 firmware bridges this">${esc(f.label)}</button>`).join("");
+  return `<section class="card w-mods"><div class="stack">
+    <div class="card-head" style="margin-bottom:0"><h2>${icon("ripple", 18)} DSP link probe</h2>
+      <span class="row" style="gap:6px"><span class="pill world">research</span>${pr.watch ? '<span class="pill now">listening</span>' : ""}</span></div>
+    <p class="muted">Valeton's DSP does have USB routing modes 0-3, and its app firmware keeps the mode in one saved
+      byte: a screen inside the pedal switches it — which Valeton's own menus never name — and the app then sends
+      frame 0x6001 with the mode to the DSP over the link between the two chips, at power-on and when that screen
+      changes. Nothing on USB asks for it. This console tries the doors USB does leave open: it writes the global
+      records no Valeton app maps and reads them back — did the pedal keep the value, and do you hear the routing
+      change? — and it listens for records the pedal writes by itself, which is how you'd catch that screen being
+      used. The link-frame buttons are only answered by OpenGP5's firmware; on Valeton's they send and nothing
+      answers, and nothing changes.</p>
+    <div class="list" style="margin-top:6px">${rows}</div>
+    <div class="row" style="margin-top:10px;flex-wrap:wrap;gap:8px">
+      <button class="btn" data-act="recs" ${live ? "" : "disabled"}>${icon("list", 15)} Read the records</button>
+      <button class="btn ghost" data-act="defaults" ${live ? "" : "disabled"}>${icon("restore", 15)} Restore the captured values</button>
+      <label class="row" style="gap:6px;margin-left:auto;font-size:13px;cursor:pointer"><input type="checkbox" id="prwatch" ${pr.watch ? "checked" : ""}> Listen for writes</label>
+    </div>
+    <div class="row" style="margin-top:12px;flex-wrap:wrap;gap:8px;align-items:center">
+      <span class="muted" style="font-size:12.5px">DSP link frames, OpenGP5 firmware only:</span>${frames}
+      <input type="text" id="prhex" placeholder="7e 00 01 60 08 00 01 00 00 00" aria-label="payload to send, in hex"
+        style="flex:1;min-width:220px;font-family:var(--mono,monospace)"><button class="btn ghost" data-act="raw" ${live ? "" : "disabled"}>Send payload</button></div>
+    ${pr.log.length ? `<div class="log">${esc(pr.log.join("\n"))}</div>` : ""}
+  </div></section>`;
+}
+
 // Opening a .gp5mod file. A mod's id is its name, so a file that carries one Launchpad already has doesn't join the
 // list as another row: with the same changes it is the same mod under another (often older) name, and Launchpad's
 // own row is the one that shows and writes it; with different changes it is a different mod that has to say so in a
@@ -105,7 +149,7 @@ export default {
                   `${alts.length} USB routing choices`],
           actions: `<button class="btn" data-act="file">${icon("file-import", 16)} Open a mod file</button>` }) + `
       <p class="muted" style="margin:0 0 10px">Mods that change the same part of the firmware are alternatives: picking one puts the others back.</p>
-      <div class="stack">${routing(ctx, ui.loaded)}${MODS.map((m) => card(ctx, m, false, alts)).join("")}${ui.loaded.map((m) => card(ctx, m, true, alts)).join("")}
+      <div class="stack">${routing(ctx, ui.loaded)}${state.pedal?.mode === F.MODE_STOCK ? probeConsole(ctx) : ""}${MODS.map((m) => card(ctx, m, false, alts)).join("")}${ui.loaded.map((m) => card(ctx, m, true, alts)).join("")}
         ${ui.progress ? `<div class="card"><p class="muted" style="font-size:13px;margin-bottom:6px">${esc(ui.progress.label)}</p><progress max="1" value="${ui.progress.f}"></progress></div>` : ""}
         ${ui.result ? `<div class="note ${ui.result.ok ? "good" : "bad"}">${icon(ui.result.ok ? "circle-check" : "alert-triangle", 16)}<span style="white-space:pre-wrap">${esc(ui.result.text)}</span></div>` : ""}
         ${ui.log.length ? `<div class="log">${esc(ui.log.join("\n"))}</div>` : ""}
@@ -197,5 +241,66 @@ export default {
       if (await flashIt(sections, { kind: "stock", title: `Valeton's firmware with "${mod.title}"` }, `"${mod.title}" is installed.`)) mark(mod);
     });
     root.querySelector('[data-act="undo"]').onclick = () => backToStock(false);
+
+    // The DSP link probe console: what each byte asks, and what the disassembly already answered, is in
+    // lib/linkprobe.js. All of it goes through ctx.linkQuiet, so it waits its turn behind the pedal's polling.
+    const prSay = (t) => { pr.log.push(`${new Date().toTimeString().slice(0, 8)}  ${t}`); if (pr.log.length > 200) pr.log.splice(0, pr.log.length - 200); ctx.render(); };
+    const readRecs = async (reportId) => {
+      try {
+        pr.vals = await ctx.linkQuiet((link) => readGlobals(link, 1500));
+        if (reportId !== undefined) { const v = pr.vals.get(reportId); prSay(`read back: ${P.recName(reportId)} = ${v === undefined ? "no such record" : P.fmtValue(v)}`); }
+      } catch (e) { prSay(`the records didn't answer: ${e.message}`); }
+      ctx.render();
+    };
+    if (root.querySelector('[data-act="recs"]')) {
+      root.querySelector('[data-act="recs"]').onclick = () => readRecs();
+      root.querySelectorAll("[data-set]").forEach((b) => b.onclick = async () => {
+        const id = +b.dataset.set, v = +root.querySelector(`select[data-rec="${id}"]`).value;
+        prSay(`writing ${P.recName(id)} = ${v} — listen at the outputs and the DAW for the routing changing`);
+        try {
+          const kept = await ctx.linkQuiet((link) => command(link, P.setGlobal(id, v), 3000));
+          prSay(kept ? `${P.recName(id)} = ${v} was accepted` : `${P.recName(id)} = ${v} was refused`);
+        } catch (e) { prSay(`${P.recName(id)} = ${v}: ${e.message}`); }
+        await readRecs(id);
+      });
+      root.querySelector('[data-act="defaults"]').onclick = async () => {
+        for (const r of P.PROBE_RECORDS) {
+          try { await ctx.linkQuiet((link) => command(link, P.setGlobal(r.id, r.def), 3000)); }
+          catch (e) { prSay(`${P.recName(r.id)} back to ${r.def}: ${e.message}`); }
+        }
+        prSay("the values captured from the real pedal are written back");
+        await readRecs();
+      };
+      const sendFrame = async (payload, label) => {
+        try {
+          const reply = await ctx.linkQuiet((link) => cmd(link, payload, 900));
+          prSay(`${label}: sent ${P.hex(payload)} → ${reply ? P.describeMessage(reply) : "nothing answered"}`);
+        } catch (e) { prSay(`${label}: ${e.message}`); }
+      };
+      root.querySelectorAll("[data-frame]").forEach((b) => b.onclick = () => { const f = [...P.MODE_FRAMES, P.DSP_PING][+b.dataset.frame]; sendFrame(f.payload, f.label); });
+      root.querySelector('[data-act="raw"]').onclick = () => {
+        const bytes = raw(root.querySelector("#prhex").value);
+        if (!bytes.length || bytes.some((v) => !Number.isInteger(v) || v < 0 || v > 255)) return prSay("the box wants the payload as hex bytes, like 7e 00 01 60 08 00");
+        sendFrame(bytes, "custom");
+      };
+      const stopWatch = () => { if (pr.timer) clearInterval(pr.timer); pr.timer = null; pr.watch = false; };
+      const tick = async () => {
+        if (state.view !== "mods" || state.pedal?.mode !== F.MODE_STOCK || !state.link) { stopWatch(); ctx.render(); return; }
+        if (pr.ticking) return; pr.ticking = true;
+        try {
+          const msgs = await ctx.linkQuiet(async (link) => { const out = []; let m; while ((m = await link.recv(20)) !== null) out.push(m); return out; });
+          for (const m of msgs) { const p = F.parseSysex(m); pr.log.push(`${new Date().toTimeString().slice(0, 8)}  heard  ${p && p.ok ? P.describeMessage(p.payload) : P.hex(m)}`); }
+          if (msgs.length) ctx.render();
+        } catch { stopWatch(); } finally { pr.ticking = false; }
+      };
+      root.querySelector("#prwatch").onchange = (e) => {
+        pr.watch = e.target.checked;
+        if (pr.watch && !pr.timer) pr.timer = setInterval(tick, 600);
+        if (!pr.watch) { if (pr.timer) clearInterval(pr.timer); pr.timer = null; }
+        ctx.render();
+      };
+      if (pr.watch && !pr.timer) pr.timer = setInterval(tick, 600);
+      if (!pr.vals) readRecs();
+    }
   },
 };
