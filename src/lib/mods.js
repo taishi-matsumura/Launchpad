@@ -128,46 +128,61 @@ export const MODS = [
 // files that same screen can open; write-mod-files.mjs writes them out with the built-in mods. Nothing here claims
 // "ready" before it has been on a pedal.
 //
-// valeton-rec-switch. The DSP program holds three built-in routing modes that replace the whole audio pipeline,
-// next to the normal one: mode 1 plays the dry guitar out and sends it packed to USB, mode 2 plays only what comes
-// back over USB and keeps the USB send silent, mode 3 mixes the return in and packs the dry guitar. The dispatch
-// (0xB0AC) opens them on a gate byte (mailbox 0x20002060 +0x2c, read at 0xB0C2, any non-zero opens it) and picks
-// the mode by a flag byte (the getter at 0x23B4 reads parameters +0x170); compared to 1, 2, 3 at 0xB0D0..0x0B0DA.
-// On the stock program the gate is written by an audio-stream state machine (0xBAFA: stream setup, 44000.0 in it)
-// — which is why these modes never fire from user controls. But the same DSP program has the link dispatcher at
-// 0x1C68 (frame payload = [cmd u16][len u16][args], cmd = group<<12 | index, a tbb over eight handler tables at
-// 0x4DC8..0x4E70 — OpenGP5 platform research knew these as "31 region-c handlers, dispatcher 0x5c68"; the count
-// matches this decode). Group 6's table at 0x4E5C: 0x6000 = version (0x1652, the first command the control app
-// sends), 0x6002 = the two-float query (0x167C), and in between 0x6001 -> 0x1604 writes a mode byte (parameters
-// +0x2E0) and the +0x170 mode flag from one argument together (0 = off, 1/2/3 = the three modes), while 0x6003 ->
-// 0x1630 writes just the mode byte. So the routing matrix has a full wire protocol sitting in the DSP program.
-// And Valeton's own control app (section 0x62) contains those command numbers as plain 16-bit constants: 0x6001
-// at eight places, 0x6003 at one — the same shape as 0x6000 (nine places; it is seen on the wire) and 0x6002
-// (one place; the platform recorded its reply). No MOVT pairs with them, so they are not halves of addresses.
-// We can't say which app control sends them: 0x62 is Andes code and no NDS32 disassembler is on this machine.
-// That is what one flash of this mod is for: after it the gate IS that mode byte, so any app action that sends
-// 0x6001 or 0x6003 switches the routing live, audibly, in about the modes described above. Start-up zeroes
-// +0x2E0 and the fail-safe change sends an unknown mode number into the normal pipeline, so until such a command
-// arrives the pedal is stock — flashed alone this changes nothing audible. If some control does fire it, watch
-// what the outputs and the DAW hear per mode: that gives a runtime routing switch built out of Valeton's own
-// parts, and 0x6001 with its argument as the wire command to drive from the app later.
+// valeton-rec-switch. The DSP program holds three built-in routing modes next to the normal pipeline, and a link
+// command that can pick them; the two are simply not joined. Decoded on 2026-11-20 with a real disassembler over
+// section 0x63 (in this section a code address is the file position + 0x4000, and a call that can't reach its
+// target lands on a 10-byte movw/movt/bx island at 0xA700..0xA980 whose immediate is the address, so island
+// 0xA836 -> address 0x63B5 -> file 0x23B4).
+// The dispatch at 0xB0AC (the DSP's own audio routine, 0x708 bytes of frame) reads a byte at file 0xB0C2 — control
+// block 0x20002060 +0x2c — and if it's zero goes to the normal path (0xB1B8 -> 0xB27A); otherwise it calls the
+// island 0xA836, i.e. the getter at file 0x23B4 that reads parameter block 0x20002098 +0x170, and compares what it
+// returns to 1, 2, 3 (0xB0D0..0xB0DA): bodies at 0xB0DE, 0xB168, 0xB1BC, and anything else goes to 0xB1BA. Those
+// bodies are the two pack loops T1's mods change — 64 turns over the DSP's frame halves, writing through the
+// pointers at 0x20001E60 and 0x20001C60 and the +0x100 half of the USB block — so which channel each mode routes is
+// exactly what one flash and one command can answer; it isn't measured yet. All four ways out (0xB166, 0xB1B6,
+// 0xB272, 0xB274) reach the same epilogue at 0xB9BA, so an unknown mode only skips the routing work.
+// The command side: the DSP's link dispatcher is at 0x1C68 (payload = [cmd u16][len u16][args], cmd = group<<12 |
+// index, a tbb over eight handler tables at 0x4DC0..0x4E5C; the platform notes knew this as "31 region-c handlers,
+// dispatcher 0x5c68" — same count). Group 6's table at 0x4E5C: 0x6000 = version (file 0x1652; the query the
+// platform sends and answers, so frames from a PC do reach this table), 0x6002 = a two-float query (0x167C), and
+// between them 0x6001 -> 0x1604 stores the frame's argument byte into that +0x170 byte (through 0x23C0, which also
+// marks +0x2E1) and a 1 or 3 into a mode byte at +0x2E0 (through 0x2084), while 0x6003 -> 0x1630 writes +0x2E0
+// only. Seven places in this section call that setter (0x1324, 0x15E8, 0x15F0, 0x1614, 0x161C, 0x163E, 0x240E);
+// nothing here reads +0x2E0 back. The +0x170 byte's only reader is the mode getter the dispatch calls.
+// So the wire protocol is whole and the three modes are whole; what never fires them is that the dispatch looks at
+// block +0x2c, whose only writer is a poll routine at 0xBB0C..0xBBCC that this section never calls.
+// One change joins them: read the gate from the byte the command writes. The pool the ldr at 0xB0C0 reads (0xB4BC)
+// is shared by 21 places, so the pool can't move — but the offset can, in the same 4-byte instruction: +0x2c ->
+// +0x1A8, and 0x20002060 + 0x1A8 = 0x20002098 + 0x170. Gate and mode then come from one byte, so there is no
+// half-open state: 0 is stock, 1/2/3 are the three modes. The replacement was assembled with clang for
+// thumbv7em and read back with objdump (90f8a801), and applied to a copy of the section it disassembles clean.
+// An earlier build of this mod moved the gate to +0x2E0 instead; that read 0x20002340, while the setter writes
+// 0x20002378, and its second change (0xB1BA, retargeting a branch that only skipped a nop) did nothing. Neither was
+// ever flashed.
+// Valeton's control app (section 0x62) does hold those numbers: one movi of each in the Andes disassembly
+// ($r0,#0x6001 at 0x46746, $r1,#0x6003 at 0x46A3A, both inside a routine five places call at 0x47900 — 0x20BCA,
+// 0x20C26, 0x20C46, 0x21768, 0x217A0), and the raw 16-bit constants 32 and 29 times across the section, which is
+// how much command and data look alike. The words "Both", "Input" and "BT/USB" (0x62's 0xBDDCC) sit in the middle
+// of factory test strings — "P Test Audio", "P Test BT", "Test Finish" — so the page that offers them may be a test
+// menu, not a user menu. Don't wait for Valeton's UI: after one flash, send 0x6001 with argument 1, 2, 3 and 0 from
+// Launchpad itself and watch what the outputs and the DAW hear per mode. Start-up leaves +0x170 zero, so flashed
+// alone this changes nothing audible.
 export const EXPERIMENTS = [
   {
     id: "valeton-rec-switch",
     title: "Valeton's own recording command switches the routing, no reflashing",
-    summary: "An experiment, unconfirmed on a pedal: nothing changes on its own. Valeton's DSP answers commands " +
-      "0x6001/0x6003 that set three routing modes its program holds (dry out, return only, return + dry), and its " +
-      "app code holds those commands in eight places; this mod hangs those modes' gate on that byte, so sending " +
-      "one switches routing live." + DSP_NOTE,
-    warn: "Untested: it may do nothing at all if no control in Valeton's app sends that command. Safe to try — " +
-      "the pedal starts and sounds stock, and Valeton's own row in the same list puts everything back.",
+    summary: "An experiment, untested on a pedal: nothing changes by itself. The DSP holds three routing modes " +
+      "(dry out, return only, return + dry) and command 0x6001 stores a mode number, but the gate opening them " +
+      "reads a byte nothing can write. This mod moves the gate onto that byte, so sending 0x6001 picks the " +
+      "routing live: 1/2/3 a mode, 0 stock." + DSP_NOTE,
+    warn: "Untested, and sending the command from Launchpad is still to be built. Safe to try: the pedal starts " +
+      "and sounds stock, and Valeton's own row in the same list puts everything back.",
     base: "1.0.6",
     status: "untested",                                // from the disassembly, 2026-11-20; not tried on a pedal yet
     patches: [
-      { section: 0x63, offset: 0xB0C2, before: "90f82c00", after: "90f8e002",
-        note: "the mode gate reads the byte commands 0x6001/0x6003 write (ldrb +0x2c -> +0x2E0) instead of the stream state" },
-      { section: 0x63, offset: 0xB1BA, before: "5be0", after: "5ee0",
-        note: "a mode number nobody set falls back to the normal pipeline instead of skipping it (safe at start-up)" },
+      { section: 0x63, offset: 0xB0C2, before: "90f82c00", after: "90f8a801",
+        note: "the routing modes' gate reads the byte command 0x6001 writes, not the audio stream state " +
+          "(ldrb #0x2c -> #0x1a8; 0x20002060+0x1a8 = 0x20002098+0x170, which 0x6001 writes and the mode getter reads)" },
     ],
   },
 ];
