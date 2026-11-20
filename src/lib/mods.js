@@ -185,6 +185,34 @@ export const EXPERIMENTS = [
           "(ldrb #0x2c -> #0x1a8; 0x20002060+0x1a8 = 0x20002098+0x170, which 0x6001 writes and the mode getter reads)" },
     ],
   },
+  // The pairing for the pedal of 2026-11-20, which runs usb-dry-out-and-return: flashed alone the row above would
+  // put those four mix changes back, so this one carries them together with the gate. The trigger needs no host at
+  // all: 0x62's page manager has a hidden page (0x155CC id 1, reached by three consecutive presses of key 0x1F from
+  // the home screen - the physical control isn't pinned down yet) which forces mode 3 on entry, cycles 3->2->1->3
+  // while on it, painting a solid screen per mode, and sets 0 back on leaving; each change goes through 0x47900 =
+  // the gp byte plus notify 0x12, which sends 0x6001. With the gate open those cycles retarget the audio live:
+  // entry to the page is audible, each cycle is audible, leaving is audible. Nothing at boot (+0x170 starts 0).
+  {
+    id: "rec-switch-on-dry-return",
+    title: "Valeton's switch command, on top of the dry/return mix: gate plus mix",
+    summary: "The gate change of valeton-rec-switch stacked on the dry/return mix this pedal already runs, in " +
+      "one row. Boot sounds exactly like that mix (the mode starts at 0). On a hidden factory page (three presses " +
+      "of one control from home) the pedal cycles routing 3->2->1, screen solid-coloured per mode, and on " +
+      "leaving falls back to that mix." + DSP_NOTE,
+    warn: "Untested on a pedal. At boot it must sound like the dry/return mod it stacks on; leaving the hidden " +
+      "page falls back to that mix. Valeton's own row in the same list puts everything back.",
+    base: "1.0.6",
+    status: "untested",
+    patches: [
+      { section: 0x63, offset: 0xB4C0, before: "601e0020", after: "601f0020", note: "dry pack: write to the second half (0x20001E60 -> 0x20001F60)" },
+      { section: 0x63, offset: 0xB904, before: "601e0020", after: "601d0020", note: "preset pack: write to the first half (0x20001E60 -> 0x20001D60)" },
+      { section: 0x63, offset: 0xB8A4, before: "00ee810a", after: "20ee810a", note: "left output: USB return only (vmla -> vmul)" },
+      { section: 0x63, offset: 0xB8CE, before: "00ee810a", after: "20ee810a", note: "right output: USB return only (vmla -> vmul)" },
+      { section: 0x63, offset: 0xB0C2, before: "90f82c00", after: "90f8a801",
+        note: "the routing modes' gate reads the byte command 0x6001 writes, not the audio stream state " +
+          "(ldrb #0x2c -> #0x1a8; 0x20002060+0x1a8 = 0x20002098+0x170, which 0x6001 writes and the mode getter reads)" },
+    ],
+  },
 ];
 
 export class ModError extends Error {}
